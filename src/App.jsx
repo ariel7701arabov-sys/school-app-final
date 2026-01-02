@@ -56,6 +56,7 @@ import {
 } from "firebase/firestore";
 
 // --- Firebase Configuration ---
+// שנה את זה לפרטים האמיתיים שלך
 const firebaseConfig = {
   apiKey: "AIzaSyB_02HeiN2u2XQaNe0eGmd_36U1JIKgQmI",
   authDomain: "school-app-45711.firebaseapp.com",
@@ -101,6 +102,7 @@ const App = () => {
   const [classFilter, setClassFilter] = useState('all');
   const [dismissalClassFilter, setDismissalClassFilter] = useState('all');
   const [adminUpdateClassFilter, setAdminUpdateClassFilter] = useState('all');
+  const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
   
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
@@ -355,11 +357,23 @@ const App = () => {
   }, [students, classFilter, userRole, teacherClassId]);
 
   const dismissalReport = useMemo(() => {
+    // Optimization: Create a Set of justified updates for O(1) lookup
+    const justifiedSet = new Set(
+      dailyUpdates.map(u => `${u.studentId}_${u.date}`)
+    );
+
     return students
       .filter(s => dismissalClassFilter === 'all' || s.classId === dismissalClassFilter)
       .map(student => {
-        const studentLogs = logs.filter(l => l.studentId === student.id && l.date >= reportRange.start && l.date <= reportRange.end);
-        const validLogs = studentLogs.filter(l => !dailyUpdates.some(u => u.studentId === student.id && u.date === l.date));
+        const studentLogs = logs.filter(l => 
+          l.studentId === student.id && 
+          l.date >= reportRange.start && 
+          l.date <= reportRange.end
+        );
+        
+        // Fast filtering using the Set
+        const validLogs = studentLogs.filter(l => !justifiedSet.has(`${l.studentId}_${l.date}`));
+        
         const penalty = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
         
         if (penalty === 0) return null;
@@ -367,14 +381,14 @@ const App = () => {
         let mins = (13 * 60) + penalty;
         return {
           id: student.id,
-          name: student.name,
+          name: student.name || 'לא ידוע',
           className: getClassName(student.classId),
           penalty,
           time: `${Math.floor(mins / 60)}:${(mins % 60).toString().padStart(2, '0')}`
         };
       })
       .filter(Boolean)
-      .sort((a, b) => a.className.localeCompare(b.className, 'he') || a.name.localeCompare(b.name, 'he'));
+      .sort((a, b) => (a.className || "").localeCompare(b.className || "", 'he') || (a.name || "").localeCompare(b.name || "", 'he'));
   }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes]);
 
   const statsData = useMemo(() => {
