@@ -34,7 +34,8 @@ import {
   HelpCircle,
   Wifi,
   WifiOff,
-  Loader
+  Loader,
+  Eye
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -102,6 +103,9 @@ const App = () => {
   const [dismissalClassFilter, setDismissalClassFilter] = useState('all');
   const [adminUpdateClassFilter, setAdminUpdateClassFilter] = useState('all');
   
+  // Student Details Modal State
+  const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
+
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
@@ -366,6 +370,7 @@ const App = () => {
         
         let mins = (13 * 60) + penalty;
         return {
+          id: student.id,
           name: student.name,
           className: getClassName(student.classId),
           penalty,
@@ -464,6 +469,7 @@ const App = () => {
     setDismissalClassFilter('all');
     setGradesActiveTab('input');
     setAdminUpdateClassFilter('all');
+    setSelectedStudentForDetails(null);
   };
 
   // --- Loading Screen ---
@@ -730,11 +736,47 @@ const App = () => {
              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-x-auto">
                 <table className="w-full"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">עיכוב</th><th className="px-6 py-4 text-left">שעת יציאה</th></tr></thead><tbody className="divide-y divide-slate-100">
                   {dismissalReport.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-indigo-50"><td className="px-6 py-4"><div className="font-bold">{item.name}</div><div className="text-xs text-slate-400">{item.className}</div></td><td className="px-6 py-4 text-center"><span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold border border-amber-200">{item.penalty} דק'</span></td><td className="px-6 py-4 text-left font-mono font-black text-xl text-indigo-700">{item.time}</td></tr>
+                    <tr key={idx} className="hover:bg-indigo-50 cursor-pointer" onClick={() => setSelectedStudentForDetails(item.id)}><td className="px-6 py-4"><div className="font-bold">{item.name}</div><div className="text-xs text-slate-400">{item.className}</div></td><td className="px-6 py-4 text-center"><span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold border border-amber-200">{item.penalty} דק'</span></td><td className="px-6 py-4 text-left font-mono font-black text-xl text-indigo-700">{item.time}</td></tr>
                   ))}
                   {dismissalReport.length === 0 && <tr><td colSpan="3" className="px-6 py-12 text-center text-slate-400 italic">אין עיכובים</td></tr>}
                 </tbody></table>
              </div>
+             {selectedStudentForDetails && (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                  <div className="p-4 border-b flex justify-between items-center bg-indigo-50">
+                    <h3 className="font-bold text-lg text-indigo-800">{students.find(s => s.id === selectedStudentForDetails)?.name} - פירוט</h3>
+                    <button onClick={() => setSelectedStudentForDetails(null)} className="p-2 hover:bg-indigo-100 rounded-full text-indigo-600"><X size={20}/></button>
+                  </div>
+                  <div className="p-0 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 sticky top-0"><tr><th className="px-4 py-3 text-right">תאריך</th><th className="px-4 py-3 text-right">מקצוע</th><th className="px-4 py-3 text-center">סוג</th><th className="px-4 py-3 text-center">דקות</th></tr></thead>
+                      <tbody className="divide-y">
+                        {logs.filter(l => 
+                          l.studentId === selectedStudentForDetails && 
+                          l.date >= reportRange.start && 
+                          l.date <= reportRange.end &&
+                          (l.status === 'late' || l.status === 'absent') &&
+                          !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)
+                        ).map((log, i) => (
+                          <tr key={i}>
+                            <td className="px-4 py-3"><div className="font-bold">{formatHebrewDate(log.date)}</div><div className="text-xs text-slate-400">{new Date(log.date).toLocaleDateString('he-IL')}</div></td>
+                            <td className="px-4 py-3">{getSubjectName(log.subjectId)}</td>
+                            <td className="px-4 py-3 text-center">
+                              {log.status === 'absent' ? <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">חיסור</span> : <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">איחור</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold">{log.minutes}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {logs.filter(l => l.studentId === selectedStudentForDetails && l.date >= reportRange.start && l.date <= reportRange.end && (l.status === 'late' || l.status === 'absent') && !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)).length === 0 && (
+                      <div className="p-8 text-center text-slate-400">אין אירועים חריגים בטווח זה</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+             )}
           </div>
         )}
 
