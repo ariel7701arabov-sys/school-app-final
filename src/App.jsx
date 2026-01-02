@@ -102,9 +102,6 @@ const App = () => {
   const [dismissalClassFilter, setDismissalClassFilter] = useState('all');
   const [adminUpdateClassFilter, setAdminUpdateClassFilter] = useState('all');
   
-  // Student Details Modal State
-  const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
-
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
@@ -559,7 +556,7 @@ const App = () => {
         <div className="max-w-5xl mx-auto">
           <Header title="מערכת ציונים" icon={GraduationCap} colorClass="text-emerald-700" />
           <div className="mb-6 flex">
-            <nav className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+            <nav className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto max-w-full whitespace-nowrap">
               <button onClick={() => setGradesActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${gradesActiveTab === 'input' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-100'}`}><ClipboardList size={18} /><span>הזנה</span></button>
               {userRole === 'admin' && <button onClick={() => setGradesActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${gradesActiveTab === 'stats' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-100'}`}><BarChart3 size={18} /><span>סטטיסטיקה</span></button>}
             </nav>
@@ -636,7 +633,7 @@ const App = () => {
     <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no">
       <div className="max-w-5xl mx-auto">
         <Header title="מערכת נוכחות" icon={School} colorClass="text-indigo-700" />
-        <div className="mb-6"><nav className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto inline-flex">
+        <div className="mb-6"><nav className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto max-w-full whitespace-nowrap">
           <button onClick={() => setActiveTab('attendance')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab === 'attendance' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100'}`}><Calendar size={18} /><span>רישום</span></button>
           {userRole === 'admin' && <><button onClick={() => setActiveTab('admin_updates')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab === 'admin_updates' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100'}`}><MessageSquare size={18} /><span>אישורים</span></button><button onClick={() => setActiveTab('dismissal')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab === 'dismissal' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100'}`}><LogOut size={18} /><span>יציאה</span></button><button onClick={() => setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab === 'stats' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100'}`}><BarChart3 size={18} /><span>סטטיסטיקה</span></button><button onClick={() => setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab === 'settings' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100'}`}><Users size={18} /><span>ניהול</span></button></>}
         </nav></div>
