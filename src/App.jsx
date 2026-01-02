@@ -83,6 +83,7 @@ const App = () => {
   const [loginInput, setLoginInput] = useState('');
   const [loginError, setLoginError] = useState(false);
   const [currentView, setCurrentView] = useState('menu');
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false); // For admin password recovery
 
   // --- Data from Firebase ---
   const [classes, setClasses] = useState([]);
@@ -451,6 +452,24 @@ const App = () => {
   // --- Auth Handlers ---
   const handleAuth = () => {
     setLoginError(false);
+    
+    // Recovery Mode Logic
+    if (isRecoveryMode && loginModalMode === 'admin') {
+        const MASTER_KEY = 'admin-reset'; // קוד השחזור
+        if (loginInput === MASTER_KEY) {
+            const newPass = '1234';
+            saveDoc('settings', 'global', { adminPassword: newPass });
+            setGlobalSettings({ ...globalSettings, adminPassword: newPass });
+            alert('הסיסמה אופסה בהצלחה ל-1234');
+            setIsRecoveryMode(false);
+            setLoginInput('');
+            return;
+        } else {
+            setLoginError(true);
+            return;
+        }
+    }
+
     if (loginModalMode === 'admin') {
       if (loginInput === globalSettings.adminPassword) {
         setUserRole('admin');
@@ -480,6 +499,7 @@ const App = () => {
     setGradesActiveTab('input');
     setAdminUpdateClassFilter('all');
     setSelectedStudentForDetails(null);
+    setIsRecoveryMode(false);
   };
 
   // --- Loading Screen ---
@@ -500,15 +520,44 @@ const App = () => {
         {loginModalMode && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm relative">
-              <button onClick={() => { setLoginModalMode(null); setLoginInput(''); setLoginError(false); }} className="absolute top-4 left-4 text-slate-400 hover:text-slate-600"><X size={20} /></button>
+              <button onClick={() => { setLoginModalMode(null); setLoginInput(''); setLoginError(false); setIsRecoveryMode(false); }} className="absolute top-4 left-4 text-slate-400 hover:text-slate-600"><X size={20} /></button>
               <div className="text-center mb-6">
                 <div className="bg-indigo-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><Lock className="text-indigo-600" size={24} /></div>
-                <h2 className="text-xl font-bold text-slate-800">{loginModalMode === 'admin' ? 'כניסת מנהל' : 'כניסת מורה'}</h2>
-                <p className="text-slate-500 text-sm">{loginModalMode === 'admin' ? 'הזן סיסמת מנהל' : 'הזן קוד כיתה'}</p>
+                <h2 className="text-xl font-bold text-slate-800">
+                  {loginModalMode === 'admin' 
+                    ? (isRecoveryMode ? 'שחזור סיסמה' : 'כניסת מנהל')
+                    : 'כניסת מורה'}
+                </h2>
+                <p className="text-slate-500 text-sm">
+                  {loginModalMode === 'admin' 
+                    ? (isRecoveryMode ? 'הזן קוד שחזור ראשי' : 'הזן סיסמת מנהל')
+                    : 'הזן קוד כיתה'}
+                </p>
               </div>
-              <input type="password" value={loginInput} onChange={(e) => { setLoginInput(e.target.value); setLoginError(false); }} className="w-full p-3 border border-slate-300 rounded-xl text-center text-lg outline-none focus:ring-2 focus:ring-indigo-500 mb-4" autoFocus onKeyPress={(e) => e.key === 'Enter' && handleAuth()} />
-              {loginError && <p className="text-red-500 text-xs text-center font-bold mb-4">פרטים שגויים</p>}
-              <button onClick={handleAuth} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors">התחבר</button>
+              <input 
+                type="password" 
+                value={loginInput} 
+                onChange={(e) => { setLoginInput(e.target.value); setLoginError(false); }} 
+                className="w-full p-3 border border-slate-300 rounded-xl text-center text-lg outline-none focus:ring-2 focus:ring-indigo-500 mb-4" 
+                autoFocus 
+                onKeyPress={(e) => e.key === 'Enter' && handleAuth()} 
+                placeholder={isRecoveryMode ? "קוד שחזור..." : "סיסמה..."}
+              />
+              {loginError && <p className="text-red-500 text-xs text-center font-bold mb-4">{isRecoveryMode ? 'קוד שחזור שגוי' : 'פרטים שגויים'}</p>}
+              <button onClick={handleAuth} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors">
+                  {isRecoveryMode ? 'אפס סיסמה' : 'התחבר'}
+              </button>
+              
+              {loginModalMode === 'admin' && (
+                  <div className="mt-4 text-center">
+                      <button 
+                          onClick={() => { setIsRecoveryMode(!isRecoveryMode); setLoginInput(''); setLoginError(false); }}
+                          className="text-xs text-slate-400 hover:text-indigo-600 underline"
+                      >
+                          {isRecoveryMode ? 'חזרה לכניסה רגילה' : 'שכחתי סיסמה?'}
+                      </button>
+                  </div>
+              )}
             </div>
           </div>
         )}
