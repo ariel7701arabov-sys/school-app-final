@@ -34,8 +34,7 @@ import {
   HelpCircle,
   Wifi,
   WifiOff,
-  Loader,
-  Eye
+  Loader
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -486,7 +485,7 @@ const App = () => {
   // --- Login View ---
   if (!userRole) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans relative" dir="rtl">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans relative notranslate" dir="rtl" translate="no">
         {loginModalMode && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-sm relative">
@@ -517,7 +516,7 @@ const App = () => {
   // --- Menu View ---
   if (currentView === 'menu') {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans" dir="rtl">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans notranslate" dir="rtl" translate="no">
         <div className="max-w-2xl w-full">
           <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-3">
@@ -556,7 +555,7 @@ const App = () => {
   // --- Grades App ---
   if (currentView === 'grades') {
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans" dir="rtl">
+      <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no">
         <div className="max-w-5xl mx-auto">
           <Header title="מערכת ציונים" icon={GraduationCap} colorClass="text-emerald-700" />
           <div className="mb-6 flex">
@@ -634,7 +633,7 @@ const App = () => {
 
   // --- Attendance App ---
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans" dir="rtl">
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no">
       <div className="max-w-5xl mx-auto">
         <Header title="מערכת נוכחות" icon={School} colorClass="text-indigo-700" />
         <div className="mb-6"><nav className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto inline-flex">
