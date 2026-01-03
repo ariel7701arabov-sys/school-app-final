@@ -117,19 +117,19 @@ const App = () => {
   const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
-  const [newExamDetails, setNewExamDetails] = useState(''); // NEW: Exam Details
+  const [newExamDetails, setNewExamDetails] = useState('');
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Admin Updates UI
   const [updateStudentId, setUpdateStudentId] = useState('');
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
-  const [updateStudentSearch, setUpdateStudentSearch] = useState(''); // NEW: Search in approvals
+  const [updateStudentSearch, setUpdateStudentSearch] = useState('');
 
   // Inputs
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('');
-  const [studentManagementSearch, setStudentManagementSearch] = useState(''); // NEW: Search in management
+  const [studentManagementSearch, setStudentManagementSearch] = useState('');
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newClassName, setNewClassName] = useState('');
   const [newClassPassword, setNewClassPassword] = useState(''); 
@@ -260,10 +260,10 @@ const App = () => {
     const relevantClassIds = relevantClasses.map(c => c.id);
     return students
       .filter(s => relevantClassIds.includes(s.classId))
-      .sort((a, b) => a.name.localeCompare(b.name, 'he')); // Alphabetical Sort
+      .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
   }, [students, availableClasses, classFilter]);
 
-  // --- Missing Reports Logic ---
+  // --- Missing Reports Logic (Sorted by Class) ---
   const missingReports = useMemo(() => {
     return assignments.map(assign => {
       const classStudentIds = students.filter(s => s.classId === assign.classId).map(s => s.id);
@@ -291,7 +291,9 @@ const App = () => {
         };
       }
       return null;
-    }).filter(Boolean);
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.className.localeCompare(b.className, 'he')); // Sort by Class Name
   }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
 
 
@@ -343,7 +345,7 @@ const App = () => {
       setUpdateStudentId('');
       setCustomUpdateReason('');
       setUpdateReason('חולה');
-      setUpdateStudentSearch(''); // Reset search
+      setUpdateStudentSearch(''); 
     }
   };
   const removeUpdate = (id) => removeDoc('updates', id);
@@ -353,7 +355,7 @@ const App = () => {
       const id = crypto.randomUUID(); 
       saveDoc('exams', id, { 
         title: newExamTitle.trim(), 
-        details: newExamDetails.trim(), // Exam Details
+        details: newExamDetails.trim(), 
         subjectId: selectedSubject, 
         date: newExamDate 
       }); 
@@ -443,6 +445,7 @@ const App = () => {
     
     const bestSubject = subjectStats.length ? subjectStats[0] : null;
     const bestClass = classStats.length ? classStats[0] : null;
+
     return { subjectStats, classStats, bestSubject, bestClass };
   }, [exams, grades, subjects, classes, students]);
 
@@ -524,7 +527,7 @@ const App = () => {
                      <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div>
                      <div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div>
                    </div>
-                   <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic">{e.details}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
+                   <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
                 </div>
               </div>
               <div className="lg:col-span-2">
@@ -682,15 +685,17 @@ const App = () => {
               <h2 className="text-xl font-bold flex items-center gap-2"><TrendingUp className="text-indigo-600" />סטטיסטיקה</h2>
               <div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange,start:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/><span className="self-center">-</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange,end:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/></div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג מקצועות (מהבעייתי לטוב)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">דקות</th></tr></thead><tbody className="divide-y">{[...statsData.subjectStats].reverse().map(s=><tr key={s.id}><td className="p-3">{s.name}</td><td className="p-3 text-center font-bold">{s.total}</td></tr>)}</tbody></table></div>
-              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג כיתות (לפי ממוצע)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע דקות</th></tr></thead><tbody className="divide-y">{[...statsData.classStats].reverse().map(c=><tr key={c.id}><td className="p-3">{c.name}</td><td className="p-3 text-center font-bold">{c.avg.toFixed(1)}</td></tr>)}</tbody></table></div>
-            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                <div className="bg-red-50 p-6 rounded-2xl border border-red-100 relative overflow-hidden"><div className="relative z-10"><div className="text-red-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע טעון שיפור</div><div className="text-2xl font-black text-red-600 truncate">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? statsData.subjectStats[statsData.subjectStats.length-1].name : '---'}</div><div className="text-xs text-red-400 mt-2">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? `סה"כ ${statsData.subjectStats[statsData.subjectStats.length-1].total} דקות` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-red-100 w-24 h-24" /></div>
                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100 relative overflow-hidden"><div className="relative z-10"><div className="text-amber-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה טעונה שיפור</div><div className="text-2xl font-black text-amber-600 truncate">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? statsData.classStats[statsData.classStats.length-1].name : '---'}</div><div className="text-xs text-amber-600/70 mt-2">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? `ממוצע ${statsData.classStats[statsData.classStats.length-1].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-amber-100 w-24 h-24" /></div>
                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 relative overflow-hidden"><div className="relative z-10"><div className="text-emerald-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> מקצוע מצטיין</div><div className="text-2xl font-black text-emerald-600 truncate">{statsData.subjectStats[0]?.name || '---'}</div><div className="text-xs text-emerald-500 mt-2">{statsData.subjectStats[0] ? `רק ${statsData.subjectStats[0].total} דקות` : 'אין נתונים'}</div></div><Trophy className="absolute -bottom-4 -left-4 text-emerald-100 w-24 h-24" /></div>
                <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 relative overflow-hidden"><div className="relative z-10"><div className="text-blue-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> כיתה מצטיינת</div><div className="text-2xl font-black text-blue-600 truncate">{statsData.classStats[0]?.name || '---'}</div><div className="text-xs text-blue-500 mt-2">{statsData.classStats[0] ? `ממוצע ${statsData.classStats[0].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-blue-100 w-24 h-24" /></div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג מקצועות (מהבעייתי לטוב)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">דקות</th></tr></thead><tbody className="divide-y">{[...statsData.subjectStats].reverse().map(s=><tr key={s.id}><td className="p-3">{s.name}</td><td className="p-3 text-center font-bold">{s.total}</td></tr>)}</tbody></table></div>
+              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג כיתות (לפי ממוצע)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע דקות</th></tr></thead><tbody className="divide-y">{[...statsData.classStats].reverse().map(c=><tr key={c.id}><td className="p-3">{c.name}</td><td className="p-3 text-center font-bold">{c.avg.toFixed(1)}</td></tr>)}</tbody></table></div>
             </div>
           </div>
         )}
