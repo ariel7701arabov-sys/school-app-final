@@ -39,7 +39,8 @@ import {
   ListX,
   CheckSquare,
   Search,
-  FileText
+  FileText,
+  CalendarRange
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -122,6 +123,7 @@ const App = () => {
 
   // Admin Updates UI
   const [updateStudentId, setUpdateStudentId] = useState('');
+  const [updateEndDate, setUpdateEndDate] = useState(new Date().toISOString().split('T')[0]); // NEW: End date for range
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
   const [updateStudentSearch, setUpdateStudentSearch] = useState('');
@@ -186,7 +188,12 @@ const App = () => {
     return () => unsubs.forEach(fn => fn());
   }, [user]);
 
-  useEffect(() => { if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); }, [subjects, selectedSubject]);
+  useEffect(() => { 
+      if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); 
+      // Update end date when start date changes initially or logic dictates, 
+      // but let's keep it manual for user flexibility, just defaulting on mount/change if empty.
+      if (!updateEndDate) setUpdateEndDate(selectedDate);
+  }, [subjects, selectedSubject]);
 
   // --- Helpers ---
   const saveDoc = async (col, id, data) => { if (user) await setDoc(doc(db, `artifacts/${appId}/public/data`, col, id), data); };
@@ -263,7 +270,7 @@ const App = () => {
       .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
   }, [students, availableClasses, classFilter]);
 
-  // --- Missing Reports Logic (Sorted by Class) ---
+  // --- Missing Reports Logic ---
   const missingReports = useMemo(() => {
     return assignments.map(assign => {
       const classStudentIds = students.filter(s => s.classId === assign.classId).map(s => s.id);
@@ -293,7 +300,7 @@ const App = () => {
       return null;
     })
     .filter(Boolean)
-    .sort((a, b) => a.className.localeCompare(b.className, 'he')); // Sort by Class Name
+    .sort((a, b) => a.className.localeCompare(b.className, 'he')); 
   }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
 
 
@@ -333,15 +340,28 @@ const App = () => {
   };
 
   const addDailyUpdate = () => {
-    if (updateStudentId && updateReason && selectedDate) {
-      const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
-      
-      const id = `update_${selectedDate}_${updateStudentId}`;
-      saveDoc('updates', id, { 
-        studentId: updateStudentId, 
-        date: selectedDate, 
-        reason: finalReason 
-      });
+    if (updateStudentId && updateReason && selectedDate && updateEndDate) {
+      const start = new Date(selectedDate);
+      const end = new Date(updateEndDate);
+
+      if (end < start) {
+        alert('תאריך סיום חייב להיות אחרי תאריך התחלה');
+        return;
+      }
+
+      // Loop through dates
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
+        const id = `update_${dateStr}_${updateStudentId}`;
+        
+        saveDoc('updates', id, { 
+          studentId: updateStudentId, 
+          date: dateStr, 
+          reason: finalReason 
+        });
+      }
+
       setUpdateStudentId('');
       setCustomUpdateReason('');
       setUpdateReason('חולה');
@@ -521,12 +541,9 @@ const App = () => {
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border">
                    <h3 className="font-bold text-lg mb-4">מבחנים</h3>
-                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border">
-                     <input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם המבחן..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
-                     <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן (לדוגמה: דפים ב-ה)..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
-                     <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div>
-                     <div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div>
-                   </div>
+                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border"><input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
+                   <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
+                   <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
                    <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
                 </div>
               </div>
@@ -622,7 +639,12 @@ const App = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-4">
                <h2 className="text-xl font-bold flex items-center gap-2"><MessageSquare className="text-indigo-600"/> אישור היעדרות</h2>
-               <div className="space-y-2"><label className="text-sm font-bold block">תאריך</label><input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(selectedDate)}</div></div>
+               
+               <div className="flex gap-2">
+                 <div className="space-y-2 flex-1"><label className="text-sm font-bold block">תאריך התחלה</label><input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(selectedDate)}</div></div>
+                 <div className="space-y-2 flex-1"><label className="text-sm font-bold block">תאריך סיום</label><input type="date" value={newExamDate} onChange={(e) => setNewExamDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(newExamDate)}</div></div>
+               </div>
+               
                <div className="space-y-2"><label className="text-sm font-bold block">סינון כיתה</label><select value={adminUpdateClassFilter} onChange={(e) => {setAdminUpdateClassFilter(e.target.value); setUpdateStudentId('');}} className="w-full p-2 border rounded-lg"><option value="all">כל הכיתות</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                
                <div className="space-y-2">
