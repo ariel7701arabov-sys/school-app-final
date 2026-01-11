@@ -154,6 +154,7 @@ const App = () => {
   const [newStudentClass, setNewStudentClass] = useState('');
   const [studentManagementSearch, setStudentManagementSearch] = useState(''); // שדה חדש: חיפוש בניהול
   const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSubjectDuration, setNewSubjectDuration] = useState(45); // NEW: Duration input
   const [newClassName, setNewClassName] = useState('');
   const [newClassPassword, setNewClassPassword] = useState(''); 
   const [newTeacherName, setNewTeacherName] = useState('');
@@ -328,7 +329,17 @@ const App = () => {
   // --- Actions ---
   const addClass = () => { if(newClassName.trim()){ const id=crypto.randomUUID(); saveDoc('classes',id,{name:newClassName.trim()}); setNewClassName(''); } };
   const addStudent = () => { if(newStudentName.trim()&&newStudentClass){ const id=crypto.randomUUID(); saveDoc('students',id,{name:newStudentName.trim(),classId:newStudentClass}); setNewStudentName(''); } };
-  const addSubject = () => { if(newSubjectName.trim()){ const id=crypto.randomUUID(); saveDoc('subjects',id,{name:newSubjectName.trim()}); setNewSubjectName(''); } };
+  const addSubject = () => { 
+    if(newSubjectName.trim()){ 
+      const id=crypto.randomUUID(); 
+      saveDoc('subjects',id,{
+        name:newSubjectName.trim(),
+        duration: parseInt(newSubjectDuration) || 45
+      }); 
+      setNewSubjectName(''); 
+      setNewSubjectDuration(45);
+    } 
+  };
   const addTeacher = () => { if(newTeacherName.trim()&&newTeacherCode.trim()){ const id=crypto.randomUUID(); saveDoc('teachers',id,{name:newTeacherName.trim(),password:newTeacherCode.trim()}); setNewTeacherName(''); setNewTeacherCode(''); } };
   const assignTeacherToClass = () => { if(assignTeacher&&assignClass&&assignSubject && !assignments.find(a=>a.teacherId===assignTeacher&&a.classId===assignClass&&a.subjectId===assignSubject)){ const id=crypto.randomUUID(); saveDoc('assignments',id,{teacherId:assignTeacher,classId:assignClass,subjectId:assignSubject}); } };
   const removeAssignment = (id) => removeDoc('assignments', id);
@@ -343,7 +354,9 @@ const App = () => {
     if (status === null) removeDoc('logs', id);
     else {
       markAsReported();
-      saveDoc('logs', id, { date: selectedDate, subjectId: selectedSubject, studentId, status, minutes: status === 'absent' ? 45 : (status === 'late' ? minutes : 0) });
+      const subj = subjects.find(s => s.id === selectedSubject);
+      const effectiveMinutes = status === 'absent' ? (subj?.duration || 45) : (status === 'late' ? minutes : 0);
+      saveDoc('logs', id, { date: selectedDate, subjectId: selectedSubject, studentId, status, minutes: effectiveMinutes });
     }
   };
 
@@ -427,7 +440,7 @@ const App = () => {
         let mins = (13 * 60) + penalty;
         
         // --- PERCENTAGE CALCULATION START ---
-        let totalPotentialLessons = 0;
+        let totalPotentialMinutes = 0;
         
         const start = new Date(reportRange.start);
         const end = new Date(reportRange.end);
@@ -443,12 +456,12 @@ const App = () => {
               const logsExist = logs.some(l => l.date === dStr && l.subjectId === subId && students.some(s => s.id === l.studentId && s.classId === student.classId));
               
               if (reportExists || logsExist) {
-                totalPotentialLessons++;
+                const subj = subjects.find(s => s.id === subId);
+                totalPotentialMinutes += (subj?.duration || 45);
               }
            });
         }
         
-        const totalPotentialMinutes = totalPotentialLessons * 45;
         const presentMinutes = Math.max(0, totalPotentialMinutes - penalty);
         const percentage = totalPotentialMinutes > 0 ? Math.round((presentMinutes / totalPotentialMinutes) * 100) : 100;
         // --- PERCENTAGE CALCULATION END ---
@@ -467,7 +480,7 @@ const App = () => {
       })
       .filter(Boolean)
       .sort((a, b) => (a.className||'').localeCompare(b.className||'') || (a.name||'').localeCompare(b.name||''));
-  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes, dailyReports, assignments]);
+  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes, dailyReports, assignments, subjects]);
 
   const statsData = useMemo(() => {
     const subjectStats = subjects.map(sub => {
@@ -736,7 +749,7 @@ const App = () => {
                 <div className="flex flex-col gap-2 items-end"><div className="flex items-center gap-2"><Filter size={16}/><select value={dismissalClassFilter} onChange={(e)=>setDismissalClassFilter(e.target.value)} className="bg-indigo-800 border-none rounded-lg text-sm p-2 text-white font-bold"><option value="all">כל הכיתות</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange, start:e.target.value})} className="bg-indigo-800 rounded-lg text-xs p-2 text-white"/><span className="self-center">עד</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange, end:e.target.value})} className="bg-indigo-800 rounded-lg text-xs p-2 text-white"/></div></div>
              </div>
              <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto">
-                <table className="w-full"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">עיכוב</th><th className="px-6 py-4 text-left">שעת יציאה</th></tr></thead><tbody className="divide-y">
+                <table className="w-full"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">עיכוב</th><th className="px-6 py-4 text-left">שעת יציאה</th></tr></thead><tbody className="divide-y divide-slate-100">
                   {dismissalReport.map((item, idx) => (
                     <tr key={idx} className="hover:bg-indigo-50 cursor-pointer" onClick={() => setSelectedStudentForDetails(item.id)}><td className="px-6 py-4"><div className="font-bold">{item.name}</div><div className="text-xs text-slate-400">{item.className}</div></td><td className="px-6 py-4 text-center"><span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold border border-amber-200">{item.penalty} דק'</span></td><td className="px-6 py-4 text-left font-mono font-black text-xl text-indigo-700">{item.time}</td></tr>
                   ))}
@@ -818,26 +831,8 @@ const App = () => {
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
               <h2 className="text-xl font-bold flex items-center gap-2"><TrendingUp className="text-indigo-600" />סטטיסטיקה</h2>
-              <div className="flex gap-2">
-                 <div className="text-xs">
-                    <input type="date" value={reportRange.start} onChange={(e) => setReportRange({...reportRange, start: e.target.value})} className="bg-slate-100 border-none rounded-lg text-xs p-2 outline-none" />
-                    <div className="text-[9px] text-slate-400 text-center">{formatHebrewDate(reportRange.start)}</div>
-                 </div>
-                 <span className="self-center">-</span>
-                 <div className="text-xs">
-                    <input type="date" value={reportRange.end} onChange={(e) => setReportRange({...reportRange, end: e.target.value})} className="bg-slate-100 border-none rounded-lg text-xs p-2 outline-none" />
-                    <div className="text-[9px] text-slate-400 text-center">{formatHebrewDate(reportRange.end)}</div>
-                 </div>
-              </div>
+              <div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange,start:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/><span className="self-center">-</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange,end:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/></div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-               <div className="bg-red-50 p-6 rounded-2xl border border-red-100 relative overflow-hidden"><div className="relative z-10"><div className="text-red-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע טעון שיפור</div><div className="text-2xl font-black text-red-600 truncate">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? statsData.subjectStats[statsData.subjectStats.length-1].name : '---'}</div><div className="text-xs text-red-400 mt-2">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? `סה"כ ${statsData.subjectStats[statsData.subjectStats.length-1].total} דקות` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-red-100 w-24 h-24" /></div>
-               <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100 relative overflow-hidden"><div className="relative z-10"><div className="text-amber-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה טעונה שיפור</div><div className="text-2xl font-black text-amber-600 truncate">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? statsData.classStats[statsData.classStats.length-1].name : '---'}</div><div className="text-xs text-amber-600/70 mt-2">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? `ממוצע ${statsData.classStats[statsData.classStats.length-1].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-amber-100 w-24 h-24" /></div>
-               <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 relative overflow-hidden"><div className="relative z-10"><div className="text-emerald-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> מקצוע מצטיין</div><div className="text-2xl font-black text-emerald-600 truncate">{statsData.subjectStats[0]?.name || '---'}</div><div className="text-xs text-emerald-500 mt-2">{statsData.subjectStats[0] ? `רק ${statsData.subjectStats[0].total} דקות` : 'אין נתונים'}</div></div><Trophy className="absolute -bottom-4 -left-4 text-emerald-100 w-24 h-24" /></div>
-               <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 relative overflow-hidden"><div className="relative z-10"><div className="text-blue-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> כיתה מצטיינת</div><div className="text-2xl font-black text-blue-600 truncate">{statsData.classStats[0]?.name || '---'}</div><div className="text-xs text-blue-500 mt-2">{statsData.classStats[0] ? `ממוצע ${statsData.classStats[0].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-blue-100 w-24 h-24" /></div>
-            </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג מקצועות (מהבעייתי לטוב)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">דקות</th></tr></thead><tbody className="divide-y">{[...statsData.subjectStats].reverse().map(s=><tr key={s.id}><td className="p-3">{s.name}</td><td className="p-3 text-center font-bold">{s.total}</td></tr>)}</tbody></table></div>
               <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג כיתות (לפי ממוצע)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע דקות</th></tr></thead><tbody className="divide-y">{[...statsData.classStats].reverse().map(c=><tr key={c.id}><td className="p-3">{c.name}</td><td className="p-3 text-center font-bold">{c.avg.toFixed(1)}</td></tr>)}</tbody></table></div>
@@ -885,8 +880,12 @@ const App = () => {
              
              <div className="bg-white p-5 rounded-2xl border shadow-sm">
                <h2 className="text-lg font-bold flex items-center gap-2"><BookOpen size={20} className="text-indigo-600" />מקצועות</h2>
-               <div className="flex gap-2"><input type="text" value={newSubjectName} onChange={(e) => setNewSubjectName(e.target.value)} placeholder="שם..." className="flex-1 p-2 text-sm border rounded-lg" /><button onClick={addSubject} className="p-2 bg-indigo-600 text-white rounded-lg"><Plus size={18}/></button></div>
-               <ul className="divide-y max-h-64 overflow-y-auto border rounded-lg mt-2">{subjects.map(s => <li key={s.id} className="p-2 flex justify-between items-center text-sm"><span>{s.name}</span><button onClick={() => removeSubject(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></li>)}</ul>
+               <div className="flex gap-2">
+                 <input type="text" value={newSubjectName} onChange={(e) => setNewSubjectName(e.target.value)} placeholder="שם..." className="flex-1 p-2 text-sm border rounded-lg" />
+                 <input type="number" value={newSubjectDuration} onChange={(e) => setNewSubjectDuration(e.target.value)} placeholder="דק'" className="w-16 p-2 text-sm border rounded-lg" />
+                 <button onClick={addSubject} className="p-2 bg-indigo-600 text-white rounded-lg"><Plus size={18}/></button>
+               </div>
+               <ul className="divide-y max-h-64 overflow-y-auto border rounded-lg mt-2">{subjects.map(s => <li key={s.id} className="p-2 flex justify-between items-center text-sm"><span>{s.name} <span className="text-xs text-gray-400">({s.duration || 45} דק')</span></span><button onClick={() => removeSubject(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></li>)}</ul>
              </div>
 
              <div className="bg-white p-5 rounded-2xl border shadow-sm md:col-span-2">
