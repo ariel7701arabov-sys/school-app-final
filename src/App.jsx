@@ -39,7 +39,8 @@ import {
   ListX,
   CheckSquare,
   Search,
-  FileText
+  FileText,
+  PieChart
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -65,13 +66,20 @@ import {
 // אם הוא לא מוצא (כמו כאן בתצוגה), הוא משתמש בברירת מחדל
 let firebaseConfig;
 try {
+  // @ts-ignore
   if (import.meta.env && import.meta.env.VITE_FIREBASE_API_KEY) {
     firebaseConfig = {
+      // @ts-ignore
       apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      // @ts-ignore
       authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      // @ts-ignore
       projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      // @ts-ignore
       storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      // @ts-ignore
       messagingSenderId: import.meta.env.VITE_FIREBASE_SENDER_ID,
+      // @ts-ignore
       appId: import.meta.env.VITE_FIREBASE_APP_ID
     };
   }
@@ -415,16 +423,51 @@ const App = () => {
         const sLogs = logs.filter(l => l.studentId === student.id && l.date >= reportRange.start && l.date <= reportRange.end);
         const validLogs = sLogs.filter(l => !justifiedSet.has(`${l.studentId}_${l.date}`));
         const penalty = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
-        if (penalty === 0) return null;
+        
         let mins = (13 * 60) + penalty;
+        
+        // --- PERCENTAGE CALCULATION START ---
+        let totalPotentialLessons = 0;
+        
+        const start = new Date(reportRange.start);
+        const end = new Date(reportRange.end);
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+           const dStr = d.toISOString().split('T')[0];
+           
+           const classSubjects = assignments.filter(a => a.classId === student.classId).map(a => a.subjectId);
+           const uniqueSubjects = [...new Set(classSubjects)];
+           
+           uniqueSubjects.forEach(subId => {
+              const reportExists = dailyReports.some(r => r.date === dStr && r.classId === student.classId && r.subjectId === subId);
+              const logsExist = logs.some(l => l.date === dStr && l.subjectId === subId && students.some(s => s.id === l.studentId && s.classId === student.classId));
+              
+              if (reportExists || logsExist) {
+                totalPotentialLessons++;
+              }
+           });
+        }
+        
+        const totalPotentialMinutes = totalPotentialLessons * 45;
+        const presentMinutes = Math.max(0, totalPotentialMinutes - penalty);
+        const percentage = totalPotentialMinutes > 0 ? Math.round((presentMinutes / totalPotentialMinutes) * 100) : 100;
+        // --- PERCENTAGE CALCULATION END ---
+
+        if (penalty === 0 && totalPotentialMinutes === 0) return null;
+        if (penalty === 0) return { 
+           id: student.id, name: student.name || 'לא ידוע', className: getClassName(student.classId), 
+           penalty: 0, time: "13:00", percentage, totalPotentialMinutes, presentMinutes 
+        };
+
         return {
           id: student.id, name: student.name || 'לא ידוע', className: getClassName(student.classId), penalty,
-          time: `${Math.floor(mins / 60)}:${(mins % 60).toString().padStart(2, '0')}`
+          time: `${Math.floor(mins / 60)}:${(mins % 60).toString().padStart(2, '0')}`,
+          percentage, totalPotentialMinutes, presentMinutes
         };
       })
       .filter(Boolean)
       .sort((a, b) => (a.className||'').localeCompare(b.className||'') || (a.name||'').localeCompare(b.name||''));
-  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes]);
+  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes, dailyReports, assignments]);
 
   const statsData = useMemo(() => {
     const subjectStats = subjects.map(sub => {
@@ -700,7 +743,73 @@ const App = () => {
                   {dismissalReport.length === 0 && <tr><td colSpan="3" className="px-6 py-12 text-center text-slate-400 italic">אין עיכובים</td></tr>}
                 </tbody></table>
              </div>
-             {selectedStudentForDetails && <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col"><div className="p-4 border-b flex justify-between items-center bg-indigo-50"><h3 className="font-bold text-lg text-indigo-800">{students.find(s=>s.id===selectedStudentForDetails)?.name} - פירוט</h3><button onClick={()=>setSelectedStudentForDetails(null)} className="p-2 hover:bg-indigo-100 rounded-full text-indigo-600"><X size={20}/></button></div><div className="p-0 overflow-y-auto"><table className="w-full text-sm"><thead className="bg-slate-50 sticky top-0"><tr><th className="px-4 py-3 text-right">תאריך</th><th className="px-4 py-3 text-right">מקצוע</th><th className="px-4 py-3 text-center">סוג</th><th className="px-4 py-3 text-center">דקות</th></tr></thead><tbody className="divide-y">{logs.filter(l => l.studentId === selectedStudentForDetails && l.date >= reportRange.start && l.date <= reportRange.end && (l.status === 'late' || l.status === 'absent') && !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)).map((log, i) => <tr key={i}><td className="px-4 py-3"><div className="font-bold">{formatHebrewDate(log.date)}</div></td><td className="px-4 py-3">{getSubjectName(log.subjectId)}</td><td className="px-4 py-3 text-center">{log.status === 'absent' ? 'חיסור' : 'איחור'}</td><td className="px-4 py-3 text-center font-bold">{log.minutes}</td></tr>)}</tbody></table></div></div></div>}
+             {selectedStudentForDetails && (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                  <div className="p-4 border-b flex justify-between items-center bg-indigo-50">
+                    <h3 className="font-bold text-lg text-indigo-800">{students.find(s => s.id === selectedStudentForDetails)?.name} - פירוט</h3>
+                    <button onClick={() => setSelectedStudentForDetails(null)} className="p-2 hover:bg-indigo-100 rounded-full text-indigo-600"><X size={20}/></button>
+                  </div>
+                  
+                  {/* Pie Chart Section - Start */}
+                  <div className="p-6 bg-slate-50 border-b flex flex-col items-center">
+                    {(() => {
+                         const currentStudentReport = dismissalReport.find(r => r.id === selectedStudentForDetails);
+                         if (!currentStudentReport) return null;
+                         
+                         const { percentage, totalPotentialMinutes, presentMinutes } = currentStudentReport;
+                         
+                         return (
+                             <div className="flex items-center gap-6">
+                                <div className="relative w-32 h-32 rounded-full flex items-center justify-center shadow-lg"
+                                     style={{
+                                         background: `conic-gradient(#10b981 0% ${percentage}%, #ef4444 ${percentage}% 100%)`
+                                     }}>
+                                    <div className="absolute w-24 h-24 bg-white rounded-full flex items-center justify-center">
+                                        <span className="text-2xl font-bold text-slate-700">{percentage}%</span>
+                                    </div>
+                                </div>
+                                <div className="text-sm space-y-1">
+                                    <div className="font-bold text-slate-700">סיכום נוכחות לתקופה</div>
+                                    <div className="text-emerald-600 flex items-center gap-1"><CheckCircle size={14}/> נכח ב-{presentMinutes} דקות</div>
+                                    <div className="text-red-600 flex items-center gap-1"><XCircle size={14}/> החסיר {totalPotentialMinutes - presentMinutes} דקות</div>
+                                    <div className="text-xs text-slate-400 mt-2">מתוך סך {totalPotentialMinutes} דקות הוראה</div>
+                                </div>
+                             </div>
+                         );
+                    })()}
+                  </div>
+                  {/* Pie Chart Section - End */}
+
+                  <div className="p-0 overflow-y-auto flex-1">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 sticky top-0"><tr><th className="px-4 py-3 text-right">תאריך</th><th className="px-4 py-3 text-right">מקצוע</th><th className="px-4 py-3 text-center">סוג</th><th className="px-4 py-3 text-center">דקות</th></tr></thead>
+                      <tbody className="divide-y">
+                        {logs.filter(l => 
+                          l.studentId === selectedStudentForDetails && 
+                          l.date >= reportRange.start && 
+                          l.date <= reportRange.end &&
+                          (l.status === 'late' || l.status === 'absent') &&
+                          !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)
+                        ).map((log, i) => (
+                          <tr key={i}>
+                            <td className="px-4 py-3"><div className="font-bold">{formatHebrewDate(log.date)}</div><div className="text-xs text-slate-400">{new Date(log.date).toLocaleDateString('he-IL')}</div></td>
+                            <td className="px-4 py-3">{getSubjectName(log.subjectId)}</td>
+                            <td className="px-4 py-3 text-center">
+                              {log.status === 'absent' ? <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">חיסור</span> : <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">איחור</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold">{log.minutes}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {logs.filter(l => l.studentId === selectedStudentForDetails && l.date >= reportRange.start && l.date <= reportRange.end && (l.status === 'late' || l.status === 'absent') && !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)).length === 0 && (
+                      <div className="p-8 text-center text-slate-400">אין אירועים חריגים בטווח זה</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+             )}
           </div>
         )}
 
@@ -709,9 +818,19 @@ const App = () => {
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl border shadow-sm">
               <h2 className="text-xl font-bold flex items-center gap-2"><TrendingUp className="text-indigo-600" />סטטיסטיקה</h2>
-              <div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange,start:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/><span className="self-center">-</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange,end:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/></div>
+              <div className="flex gap-2">
+                 <div className="text-xs">
+                    <input type="date" value={reportRange.start} onChange={(e) => setReportRange({...reportRange, start: e.target.value})} className="bg-slate-100 border-none rounded-lg text-xs p-2 outline-none" />
+                    <div className="text-[9px] text-slate-400 text-center">{formatHebrewDate(reportRange.start)}</div>
+                 </div>
+                 <span className="self-center">-</span>
+                 <div className="text-xs">
+                    <input type="date" value={reportRange.end} onChange={(e) => setReportRange({...reportRange, end: e.target.value})} className="bg-slate-100 border-none rounded-lg text-xs p-2 outline-none" />
+                    <div className="text-[9px] text-slate-400 text-center">{formatHebrewDate(reportRange.end)}</div>
+                 </div>
+              </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                <div className="bg-red-50 p-6 rounded-2xl border border-red-100 relative overflow-hidden"><div className="relative z-10"><div className="text-red-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע טעון שיפור</div><div className="text-2xl font-black text-red-600 truncate">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? statsData.subjectStats[statsData.subjectStats.length-1].name : '---'}</div><div className="text-xs text-red-400 mt-2">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? `סה"כ ${statsData.subjectStats[statsData.subjectStats.length-1].total} דקות` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-red-100 w-24 h-24" /></div>
                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100 relative overflow-hidden"><div className="relative z-10"><div className="text-amber-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה טעונה שיפור</div><div className="text-2xl font-black text-amber-600 truncate">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? statsData.classStats[statsData.classStats.length-1].name : '---'}</div><div className="text-xs text-amber-600/70 mt-2">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? `ממוצע ${statsData.classStats[statsData.classStats.length-1].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-amber-100 w-24 h-24" /></div>
