@@ -218,7 +218,10 @@ const App = () => {
   
   const getClassName = (id) => classes.find(c => c.id === id)?.name || 'ללא כיתה';
   const getSubjectName = (id) => subjects.find(s => s.id === id)?.name || 'לא ידוע';
-  const getTeacherName = (id) => teachers.find(t => t.id === id)?.name || 'לא ידוע';
+  const getTeacherName = (id) => {
+    if (id === 'admin') return 'דווח על ידי המנהל';
+    return teachers.find(t => t.id === id)?.name || 'לא ידוע';
+  };
   
   // פונקציה לחישוב מספר התלמידים בכיתה
   const getStudentCountInClass = (classId) => students.filter(s => s.classId === classId).length;
@@ -341,7 +344,19 @@ const App = () => {
     } 
   };
   const addTeacher = () => { if(newTeacherName.trim()&&newTeacherCode.trim()){ const id=crypto.randomUUID(); saveDoc('teachers',id,{name:newTeacherName.trim(),password:newTeacherCode.trim()}); setNewTeacherName(''); setNewTeacherCode(''); } };
-  const assignTeacherToClass = () => { if(assignTeacher&&assignClass&&assignSubject && !assignments.find(a=>a.teacherId===assignTeacher&&a.classId===assignClass&&a.subjectId===assignSubject)){ const id=crypto.randomUUID(); saveDoc('assignments',id,{teacherId:assignTeacher,classId:assignClass,subjectId:assignSubject}); } };
+  
+  const assignTeacherToClass = () => { 
+    if (assignClass && assignSubject) { 
+        // Allow admin/no-teacher assignment by defaulting to 'admin' if empty
+        const tId = assignTeacher || 'admin';
+        const exists = assignments.find(a => a.teacherId === tId && a.classId === assignClass && a.subjectId === assignSubject);
+        if (!exists) { 
+            const id = crypto.randomUUID(); 
+            saveDoc('assignments', id, { teacherId: tId, classId: assignClass, subjectId: assignSubject }); 
+        } 
+    } 
+  };
+  
   const removeAssignment = (id) => removeDoc('assignments', id);
   const removeTeacher = (id) => removeDoc('teachers', id);
   const removeClassAndRefs = (id) => removeDoc('classes', id);
@@ -365,9 +380,6 @@ const App = () => {
     if (selectedSubject && classFilter !== 'all') {
        const reporterId = loggedInTeacherId || 'admin';
        const id = `report_${selectedDate}_${classFilter}_${selectedSubject}`;
-       
-       // If admin does it, we might want to attribute it to the assigned teacher to clear the "missing" status?
-       // But keeping it simple: just record that a report exists. The missingReports logic checks for ANY report.
        
        saveDoc('daily_reports', id, {
          date: selectedDate,
@@ -893,7 +905,10 @@ const App = () => {
                   <div className="space-y-2 p-3 bg-slate-50 rounded-xl">
                       <div className="text-sm font-bold">שיוך מורה לכיתה ומקצוע</div>
                       <div className="flex gap-2 flex-wrap">
-                          <select value={assignTeacher} onChange={(e)=>setAssignTeacher(e.target.value)} className="p-2 text-sm border rounded-lg flex-1"><option value="">מורה...</option>{teachers.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select>
+                          <select value={assignTeacher} onChange={(e)=>setAssignTeacher(e.target.value)} className="p-2 text-sm border rounded-lg flex-1"><option value="">מורה...</option>
+                              <option value="admin">ללא מורה (באחריות מנהל)</option>
+                              {teachers.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
                           <select value={assignClass} onChange={(e)=>setAssignClass(e.target.value)} className="p-2 text-sm border rounded-lg flex-1"><option value="">כיתה...</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
                           <select value={assignSubject} onChange={(e)=>setAssignSubject(e.target.value)} className="p-2 text-sm border rounded-lg flex-1"><option value="">מקצוע...</option>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>
                           <button onClick={assignTeacherToClass} className="p-2 bg-indigo-600 text-white rounded-lg"><Plus size={16}/></button>
