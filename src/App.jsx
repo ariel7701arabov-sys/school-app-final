@@ -361,13 +361,19 @@ const App = () => {
   };
 
   const markAsReported = () => {
-    if (userRole === 'teacher' && loggedInTeacherId && selectedSubject && classFilter !== 'all') {
+    // Allows admin to also mark as reported if a specific class is selected
+    if (selectedSubject && classFilter !== 'all') {
+       const reporterId = loggedInTeacherId || 'admin';
        const id = `report_${selectedDate}_${classFilter}_${selectedSubject}`;
+       
+       // If admin does it, we might want to attribute it to the assigned teacher to clear the "missing" status?
+       // But keeping it simple: just record that a report exists. The missingReports logic checks for ANY report.
+       
        saveDoc('daily_reports', id, {
          date: selectedDate,
          classId: classFilter,
          subjectId: selectedSubject,
-         teacherId: loggedInTeacherId,
+         teacherId: reporterId,
          timestamp: Date.now()
        });
     }
@@ -430,6 +436,28 @@ const App = () => {
 
   const dismissalReport = useMemo(() => {
     const justifiedSet = new Set(dailyUpdates.map(u => `${u.studentId}_${u.date}`));
+    
+    // 1. Map active lessons (Class + Date + Subject) based on reports AND logs
+    // This ensures that if a log exists (even without teacher assignment), the lesson counts as "Potential"
+    const activeLessonsSet = new Set();
+    
+    // Add from "All Present" reports
+    dailyReports.forEach(r => {
+      if (r.date >= reportRange.start && r.date <= reportRange.end) {
+        activeLessonsSet.add(`${r.classId}_${r.date}_${r.subjectId}`);
+      }
+    });
+
+    // Add from individual Logs (Penalties)
+    logs.forEach(l => {
+      if (l.date >= reportRange.start && l.date <= reportRange.end) {
+        const student = students.find(s => s.id === l.studentId);
+        if (student) {
+          activeLessonsSet.add(`${student.classId}_${l.date}_${l.subjectId}`);
+        }
+      }
+    });
+
     return students
       .filter(s => dismissalClassFilter === 'all' || s.classId === dismissalClassFilter)
       .map(student => {
@@ -445,19 +473,14 @@ const App = () => {
         const start = new Date(reportRange.start);
         const end = new Date(reportRange.end);
         
+        // Iterate days in range
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
            const dStr = d.toISOString().split('T')[0];
            
-           const classSubjects = assignments.filter(a => a.classId === student.classId).map(a => a.subjectId);
-           const uniqueSubjects = [...new Set(classSubjects)];
-           
-           uniqueSubjects.forEach(subId => {
-              const reportExists = dailyReports.some(r => r.date === dStr && r.classId === student.classId && r.subjectId === subId);
-              const logsExist = logs.some(l => l.date === dStr && l.subjectId === subId && students.some(s => s.id === l.studentId && s.classId === student.classId));
-              
-              if (reportExists || logsExist) {
-                const subj = subjects.find(s => s.id === subId);
-                totalPotentialMinutes += (subj?.duration || 45);
+           // Check against ALL subjects to see if a lesson occurred for this student's class
+           subjects.forEach(sub => {
+              if (activeLessonsSet.has(`${student.classId}_${dStr}_${sub.id}`)) {
+                totalPotentialMinutes += (sub.duration || 45);
               }
            });
         }
@@ -480,7 +503,7 @@ const App = () => {
       })
       .filter(Boolean)
       .sort((a, b) => (a.className||'').localeCompare(b.className||'') || (a.name||'').localeCompare(b.name||''));
-  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes, dailyReports, assignments, subjects]);
+  }, [students, logs, dailyUpdates, reportRange, dismissalClassFilter, classes, dailyReports, subjects]);
 
   const statsData = useMemo(() => {
     const subjectStats = subjects.map(sub => {
@@ -644,8 +667,9 @@ const App = () => {
               <div className="space-y-2"><label className="text-sm font-bold block">מקצוע</label><select value={selectedSubject} onChange={(e)=>setSelectedSubject(e.target.value)} className="w-full p-2 border rounded-lg">{availableSubjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             </div>
             
-            {/* Mark All Present Button */}
-            {userRole === 'teacher' && selectedSubject && classFilter !== 'all' && (
+            {/* Mark All Present Button - Visible to Teacher AND Admin */}
+            {( (userRole === 'teacher' && selectedSubject && classFilter !== 'all') || 
+               (userRole === 'admin' && selectedSubject && classFilter !== 'all') ) && (
               <div className="flex justify-end">
                 <button 
                   onClick={markAsReported}
@@ -833,6 +857,14 @@ const App = () => {
               <h2 className="text-xl font-bold flex items-center gap-2"><TrendingUp className="text-indigo-600" />סטטיסטיקה</h2>
               <div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange,start:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/><span className="self-center">-</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange,end:e.target.value})} className="bg-slate-100 rounded-lg text-xs p-2"/></div>
             </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+               <div className="bg-red-50 p-6 rounded-2xl border border-red-100 relative overflow-hidden"><div className="relative z-10"><div className="text-red-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע טעון שיפור</div><div className="text-2xl font-black text-red-600 truncate">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? statsData.subjectStats[statsData.subjectStats.length-1].name : '---'}</div><div className="text-xs text-red-400 mt-2">{statsData.subjectStats[statsData.subjectStats.length-1]?.total > 0 ? `סה"כ ${statsData.subjectStats[statsData.subjectStats.length-1].total} דקות` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-red-100 w-24 h-24" /></div>
+               <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100 relative overflow-hidden"><div className="relative z-10"><div className="text-amber-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה טעונה שיפור</div><div className="text-2xl font-black text-amber-600 truncate">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? statsData.classStats[statsData.classStats.length-1].name : '---'}</div><div className="text-xs text-amber-600/70 mt-2">{statsData.classStats[statsData.classStats.length-1]?.total > 0 ? `ממוצע ${statsData.classStats[statsData.classStats.length-1].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-amber-100 w-24 h-24" /></div>
+               <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 relative overflow-hidden"><div className="relative z-10"><div className="text-emerald-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> מקצוע מצטיין</div><div className="text-2xl font-black text-emerald-600 truncate">{statsData.subjectStats[0]?.name || '---'}</div><div className="text-xs text-emerald-500 mt-2">{statsData.subjectStats[0] ? `רק ${statsData.subjectStats[0].total} דקות` : 'אין נתונים'}</div></div><Trophy className="absolute -bottom-4 -left-4 text-emerald-100 w-24 h-24" /></div>
+               <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 relative overflow-hidden"><div className="relative z-10"><div className="text-blue-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> כיתה מצטיינת</div><div className="text-2xl font-black text-blue-600 truncate">{statsData.classStats[0]?.name || '---'}</div><div className="text-xs text-blue-500 mt-2">{statsData.classStats[0] ? `ממוצע ${statsData.classStats[0].avg.toFixed(1)} דק'` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-blue-100 w-24 h-24" /></div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג מקצועות (מהבעייתי לטוב)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">דקות</th></tr></thead><tbody className="divide-y">{[...statsData.subjectStats].reverse().map(s=><tr key={s.id}><td className="p-3">{s.name}</td><td className="p-3 text-center font-bold">{s.total}</td></tr>)}</tbody></table></div>
               <div className="bg-white rounded-2xl border shadow-sm overflow-hidden"><div className="p-4 border-b font-bold text-slate-700">דירוג כיתות (לפי ממוצע)</div><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע דקות</th></tr></thead><tbody className="divide-y">{[...statsData.classStats].reverse().map(c=><tr key={c.id}><td className="p-3">{c.name}</td><td className="p-3 text-center font-bold">{c.avg.toFixed(1)}</td></tr>)}</tbody></table></div>
