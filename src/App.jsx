@@ -39,8 +39,7 @@ import {
   ListX,
   CheckSquare,
   Search,
-  FileText,
-  CalendarRange
+  FileText
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -62,14 +61,10 @@ import {
 } from "firebase/firestore";
 
 // --- Firebase Configuration ---
-const firebaseConfig = {
-  apiKey: "AIzaSyB_02HeiN2u2XQaNe0eGmd_36U1JIKgQmI",
-  authDomain: "school-app-45711.firebaseapp.com",
-  projectId: "school-app-45711",
-  storageBucket: "school-app-45711.firebasestorage.app",
-  messagingSenderId: "5129195648",
-  appId: "1:5129195648:web:5e6c9a2661d27242325665"
-};
+// הערה: בקוד המקומי שלך ב-VS Code, אתה יכול להשתמש בקובץ .env כפי שלמדת.
+// כאן בסביבת התצוגה, אנו משתמשים במשתנה המערכת כדי שזה יעבוד מיד.
+const firebaseConfig = JSON.parse(__firebase_config);
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -102,7 +97,7 @@ const App = () => {
   const [exams, setExams] = useState([]);
   const [grades, setGrades] = useState([]);
   const [dailyUpdates, setDailyUpdates] = useState([]);
-  const [dailyReports, setDailyReports] = useState([]); // New: Tracks "All Present" confirmations
+  const [dailyReports, setDailyReports] = useState([]); 
   const [globalSettings, setGlobalSettings] = useState({ adminPassword: '1234' });
 
   // --- UI State ---
@@ -118,20 +113,19 @@ const App = () => {
   const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
-  const [newExamDetails, setNewExamDetails] = useState('');
+  const [newExamDetails, setNewExamDetails] = useState(''); // שדה חדש: פירוט מבחן
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Admin Updates UI
   const [updateStudentId, setUpdateStudentId] = useState('');
-  const [updateEndDate, setUpdateEndDate] = useState(new Date().toISOString().split('T')[0]); // NEW: End date for range
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
-  const [updateStudentSearch, setUpdateStudentSearch] = useState('');
+  const [updateStudentSearch, setUpdateStudentSearch] = useState(''); // שדה חדש: חיפוש באישור
 
   // Inputs
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('');
-  const [studentManagementSearch, setStudentManagementSearch] = useState('');
+  const [studentManagementSearch, setStudentManagementSearch] = useState(''); // שדה חדש: חיפוש בניהול
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newClassName, setNewClassName] = useState('');
   const [newClassPassword, setNewClassPassword] = useState(''); 
@@ -188,12 +182,7 @@ const App = () => {
     return () => unsubs.forEach(fn => fn());
   }, [user]);
 
-  useEffect(() => { 
-      if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); 
-      // Update end date when start date changes initially or logic dictates, 
-      // but let's keep it manual for user flexibility, just defaulting on mount/change if empty.
-      if (!updateEndDate) setUpdateEndDate(selectedDate);
-  }, [subjects, selectedSubject]);
+  useEffect(() => { if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); }, [subjects, selectedSubject]);
 
   // --- Helpers ---
   const saveDoc = async (col, id, data) => { if (user) await setDoc(doc(db, `artifacts/${appId}/public/data`, col, id), data); };
@@ -202,6 +191,9 @@ const App = () => {
   const getClassName = (id) => classes.find(c => c.id === id)?.name || 'ללא כיתה';
   const getSubjectName = (id) => subjects.find(s => s.id === id)?.name || 'לא ידוע';
   const getTeacherName = (id) => teachers.find(t => t.id === id)?.name || 'לא ידוע';
+  
+  // פונקציה לחישוב מספר התלמידים בכיתה
+  const getStudentCountInClass = (classId) => students.filter(s => s.classId === classId).length;
 
   const toGematria = (num) => {
     if (num === 0) return ''; if (num > 5000) num = num % 5000;
@@ -265,6 +257,8 @@ const App = () => {
     let relevantClasses = availableClasses;
     if (classFilter !== 'all') relevantClasses = classes.filter(c => c.id === classFilter);
     const relevantClassIds = relevantClasses.map(c => c.id);
+    
+    // מיון לפי א' ב' כברירת מחדל
     return students
       .filter(s => relevantClassIds.includes(s.classId))
       .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
@@ -340,28 +334,15 @@ const App = () => {
   };
 
   const addDailyUpdate = () => {
-    if (updateStudentId && updateReason && selectedDate && updateEndDate) {
-      const start = new Date(selectedDate);
-      const end = new Date(updateEndDate);
-
-      if (end < start) {
-        alert('תאריך סיום חייב להיות אחרי תאריך התחלה');
-        return;
-      }
-
-      // Loop through dates
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
-        const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
-        const id = `update_${dateStr}_${updateStudentId}`;
-        
-        saveDoc('updates', id, { 
-          studentId: updateStudentId, 
-          date: dateStr, 
-          reason: finalReason 
-        });
-      }
-
+    if (updateStudentId && updateReason && selectedDate) {
+      const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
+      
+      const id = `update_${selectedDate}_${updateStudentId}`;
+      saveDoc('updates', id, { 
+        studentId: updateStudentId, 
+        date: selectedDate, 
+        reason: finalReason 
+      });
       setUpdateStudentId('');
       setCustomUpdateReason('');
       setUpdateReason('חולה');
@@ -473,7 +454,7 @@ const App = () => {
     return exams.filter(e => e.subjectId === selectedSubject);
   }, [exams, selectedSubject]);
 
-  // --- Auth ---
+  // --- Auth Handlers ---
   const handleAuth = () => {
     setLoginError(false);
     if (isRecoveryMode && loginModalMode === 'admin' && loginInput === 'admin-reset') {
@@ -541,9 +522,10 @@ const App = () => {
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border">
                    <h3 className="font-bold text-lg mb-4">מבחנים</h3>
-                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border"><input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
-                   <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
-                   <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
+                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border">
+                     <input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם המבחן..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
+                     <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
+                     <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
                    <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
                 </div>
               </div>
@@ -685,7 +667,11 @@ const App = () => {
         {userRole === 'admin' && activeTab === 'dismissal' && (
           <div className="space-y-6">
              <div className="bg-indigo-900 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
-                <div><h2 className="text-2xl font-bold flex items-center gap-2"><Timer />דו"ח יציאה</h2><p className="text-indigo-200 text-sm">חישוב עיכובים בניכוי אישורים</p><p className="text-indigo-200 text-sm mt-1 font-bold bg-indigo-800/50 p-2 rounded-lg">טווח: {formatHebrewDate(reportRange.start)} - {formatHebrewDate(reportRange.end)}</p></div>
+                <div><h2 className="text-2xl font-bold flex items-center gap-2"><Timer />דו"ח יציאה</h2><p className="text-indigo-200 text-sm">חישוב עיכובים בניכוי אישורים</p>
+                <p className="text-indigo-200 text-sm mt-1 font-bold bg-indigo-800/50 p-2 rounded-lg">
+                  טווח: {formatHebrewDate(reportRange.start)} - {formatHebrewDate(reportRange.end)}
+                </p>
+                </div>
                 <div className="flex flex-col gap-2 items-end"><div className="flex items-center gap-2"><Filter size={16}/><select value={dismissalClassFilter} onChange={(e)=>setDismissalClassFilter(e.target.value)} className="bg-indigo-800 border-none rounded-lg text-sm p-2 text-white font-bold"><option value="all">כל הכיתות</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div className="flex gap-2"><input type="date" value={reportRange.start} onChange={(e)=>setReportRange({...reportRange, start:e.target.value})} className="bg-indigo-800 rounded-lg text-xs p-2 text-white"/><span className="self-center">עד</span><input type="date" value={reportRange.end} onChange={(e)=>setReportRange({...reportRange, end:e.target.value})} className="bg-indigo-800 rounded-lg text-xs p-2 text-white"/></div></div>
              </div>
              <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto">
@@ -757,7 +743,7 @@ const App = () => {
              <div className="bg-white p-5 rounded-2xl border shadow-sm">
                <h2 className="text-lg font-bold flex items-center gap-2"><School size={20} className="text-indigo-600" />כיתות</h2>
                <div className="flex gap-2"><input type="text" value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="שם..." className="flex-1 p-2 text-sm border rounded-lg" /><button onClick={addClass} className="p-2 bg-indigo-600 text-white rounded-lg"><Plus size={18}/></button></div>
-               <ul className="divide-y max-h-64 overflow-y-auto border rounded-lg mt-2">{classes.map(c => <li key={c.id} className="p-3 flex justify-between items-center text-sm"><span>{c.name} <span className="text-xs text-gray-500">({students.filter(s => s.classId === c.id).length} תלמידים)</span></span><button onClick={() => removeClassAndRefs(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></li>)}</ul>
+               <ul className="divide-y max-h-64 overflow-y-auto border rounded-lg mt-2">{classes.map(c => <li key={c.id} className="p-3 flex justify-between items-center text-sm"><span>{c.name} <span className="text-xs text-gray-500">({getStudentCountInClass(c.id)} תלמידים)</span></span><button onClick={() => removeClassAndRefs(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></li>)}</ul>
              </div>
              
              <div className="bg-white p-5 rounded-2xl border shadow-sm">
@@ -787,6 +773,7 @@ const App = () => {
                <ul className="divide-y max-h-64 overflow-y-auto border rounded-lg mt-2">
                  {students
                     .filter(s => s.name.includes(studentManagementSearch))
+                    .sort((a, b) => a.name.localeCompare(b.name, 'he')) // Alphabetical Sort
                     .map(s => <li key={s.id} className="p-2 flex justify-between items-center text-sm"><div><div className="font-medium">{s.name}</div><div className="text-[10px] text-slate-400">{getClassName(s.classId)}</div></div><button onClick={() => removeStudentAndRefs(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></li>)
                  }
                </ul>
