@@ -61,9 +61,28 @@ import {
 } from "firebase/firestore";
 
 // --- Firebase Configuration ---
-// הערה: בקוד המקומי שלך ב-VS Code, אתה יכול להשתמש בקובץ .env כפי שלמדת.
-// כאן בסביבת התצוגה, אנו משתמשים במשתנה המערכת כדי שזה יעבוד מיד.
-const firebaseConfig = JSON.parse(__firebase_config);
+// הקוד מנסה למשוך את ההגדרות מקובץ .env (עבור המחשב שלך)
+// אם הוא לא מוצא (כמו כאן בתצוגה), הוא משתמש בברירת מחדל
+let firebaseConfig;
+try {
+  if (import.meta.env && import.meta.env.VITE_FIREBASE_API_KEY) {
+    firebaseConfig = {
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID
+    };
+  }
+} catch (error) {
+  // התעלם משגיאות אם import.meta לא קיים
+}
+
+// Fallback לסביבת התצוגה (Canvas)
+if (!firebaseConfig && typeof __firebase_config !== 'undefined') {
+    firebaseConfig = JSON.parse(__firebase_config);
+}
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -522,10 +541,9 @@ const App = () => {
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border">
                    <h3 className="font-bold text-lg mb-4">מבחנים</h3>
-                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border">
-                     <input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם המבחן..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
-                     <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
-                     <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
+                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border"><input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
+                   <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
+                   <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
                    <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
                 </div>
               </div>
@@ -601,7 +619,7 @@ const App = () => {
                  </div>
                </div>
             </div>
-            <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto">
+            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
                <table className="w-full text-sm min-w-[600px]"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">מורה</th><th className="px-6 py-4 text-right">כיתה</th><th className="px-6 py-4 text-right">מקצוע</th><th className="px-6 py-4 text-center">סטטוס</th></tr></thead><tbody className="divide-y">
                  {missingReports.map((item, idx) => (
                    <tr key={idx} className="hover:bg-red-50">
