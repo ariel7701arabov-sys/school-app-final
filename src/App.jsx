@@ -59,7 +59,7 @@ import {
   deleteDoc, 
   onSnapshot,
   query,
-  where // הוספנו את where לצורך סינון נתונים יעיל
+  where 
 } from "firebase/firestore";
 
 // --- Firebase Configuration ---
@@ -123,6 +123,7 @@ const App = () => {
   const [grades, setGrades] = useState([]);
   const [dailyUpdates, setDailyUpdates] = useState([]);
   const [dailyReports, setDailyReports] = useState([]); 
+  const [shabbatApprovals, setShabbatApprovals] = useState([]); // חדש: אישורי שבת
   const [globalSettings, setGlobalSettings] = useState({ adminPassword: '1234' });
 
   // --- UI State ---
@@ -141,11 +142,18 @@ const App = () => {
   const [newExamDetails, setNewExamDetails] = useState(''); 
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Admin Updates UI
+  // Admin Updates UI (אישורי היעדרות)
   const [updateStudentId, setUpdateStudentId] = useState('');
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
   const [updateStudentSearch, setUpdateStudentSearch] = useState(''); 
+  const [updateSubjectId, setUpdateSubjectId] = useState('all'); // חדש: מקצוע לאישור
+
+  // Shabbat Approvals UI (אישורי שבת)
+  const [shabbatDate, setShabbatDate] = useState(new Date().toISOString().split('T')[0]);
+  const [shabbatClassFilter, setShabbatClassFilter] = useState('all');
+  const [shabbatStudentId, setShabbatStudentId] = useState('');
+  const [shabbatStudentSearch, setShabbatStudentSearch] = useState('');
 
   // Inputs
   const [newStudentName, setNewStudentName] = useState('');
@@ -161,7 +169,7 @@ const App = () => {
   const [assignClass, setAssignClass] = useState('');
   const [assignSubject, setAssignSubject] = useState('');
 
-  // Report Range - שונה לחודש אחורה כברירת מחדל
+  // Report Range
   const defaultStartDate = new Date();
   defaultStartDate.setMonth(defaultStartDate.getMonth() - 1); 
   const [reportRange, setReportRange] = useState({
@@ -194,7 +202,7 @@ const App = () => {
     return () => { unsubscribe(); window.removeEventListener('online', () => setIsOffline(false)); window.removeEventListener('offline', () => setIsOffline(true)); };
   }, []);
 
-  // 1. Sync Static Data (טעינת נתונים קבועים)
+  // 1. Sync Static Data
   useEffect(() => {
     if (!user) return;
     const basePath = `artifacts/${appId}/public/data`;
@@ -207,27 +215,26 @@ const App = () => {
     return () => unsubs.forEach(fn => fn());
   }, [user]);
 
-  // 2. Sync Dynamic Data (טעינת נתוני נוכחות מותאמת ביצועים)
+  // 2. Sync Dynamic Data
   useEffect(() => {
     if (!user) return;
     const basePath = `artifacts/${appId}/public/data`;
 
-    // קביעת התאריך ממנו נמשוך נתונים כדי למנוע העמסה
     let startDateStr = selectedDate;
     if (userRole === 'admin') {
-       // למנהל: תמיד לקחת את המוקדם מבין "תחילת טווח הסטטיסטיקה" לבין "היום הנבחר למעקב"
        startDateStr = reportRange.start < selectedDate ? reportRange.start : selectedDate;
     }
 
-    // שימוש בשאילתה בודדת (Single Condition) המאפשרת סינון ראשוני מהיר וחוסכת תעבורת רשת
     const qLogs = query(collection(db, basePath, 'logs'), where('date', '>=', startDateStr));
     const qUpdates = query(collection(db, basePath, 'updates'), where('date', '>=', startDateStr));
     const qReports = query(collection(db, basePath, 'daily_reports'), where('date', '>=', startDateStr));
+    const qShabbat = query(collection(db, basePath, 'shabbat_approvals'), where('date', '>=', startDateStr));
 
     const unsubs = [
       onSnapshot(qLogs, (snap) => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))),
       onSnapshot(qUpdates, (snap) => setDailyUpdates(snap.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(qReports, (snap) => setDailyReports(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      onSnapshot(qReports, (snap) => setDailyReports(snap.docs.map(d => ({ id: d.id, ...d.data() })))),
+      onSnapshot(qShabbat, (snap) => setShabbatApprovals(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
     ];
     return () => unsubs.forEach(fn => fn());
   }, [user, userRole, selectedDate, reportRange.start]);
@@ -408,23 +415,47 @@ const App = () => {
     }
   };
 
-  const addDailyUpdate = () => {
-    if (updateStudentId && updateReason && selectedDate) {
+  const addDailyUpdate = async () => {
+    if (updateStudentId && updateReason && selectedDate && newExamDate) {
       const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
       
-      const id = `update_${selectedDate}_${updateStudentId}`;
-      saveDoc('updates', id, { 
-        studentId: updateStudentId, 
-        date: selectedDate, 
-        reason: finalReason 
-      });
+      const start = new Date(selectedDate);
+      const end = new Date(newExamDate);
+      
+      // יצירת מסמך לכל יום בטווח
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dStr = d.toISOString().split('T')[0];
+        const id = `update_${dStr}_${updateStudentId}_${updateSubjectId}`;
+        await saveDoc('updates', id, { 
+          studentId: updateStudentId, 
+          date: dStr, 
+          subjectId: updateSubjectId, // יכול להיות 'all' או ID של מקצוע
+          reason: finalReason 
+        });
+      }
+
       setUpdateStudentId('');
       setCustomUpdateReason('');
       setUpdateReason('חולה');
       setUpdateStudentSearch(''); 
+      setUpdateSubjectId('all');
     }
   };
   const removeUpdate = (id) => removeDoc('updates', id);
+
+  const addShabbatApproval = () => {
+    if (shabbatStudentId && shabbatDate) {
+      const id = `shabbat_${shabbatDate}_${shabbatStudentId}`;
+      saveDoc('shabbat_approvals', id, {
+        studentId: shabbatStudentId,
+        date: shabbatDate,
+        timestamp: Date.now()
+      });
+      setShabbatStudentId('');
+      setShabbatStudentSearch('');
+    }
+  };
+  const removeShabbatApproval = (id) => removeDoc('shabbat_approvals', id);
 
   const addExam = () => { 
     if (newExamTitle.trim() && selectedSubject) { 
@@ -448,7 +479,7 @@ const App = () => {
 
   // --- Getters & Reports ---
   const getLog = (sid) => logs.find(l => l.date === selectedDate && l.subjectId === selectedSubject && l.studentId === sid);
-  const getDailyUpdate = (sid) => dailyUpdates.find(u => u.studentId === sid && u.date === selectedDate);
+  const getDailyUpdate = (sid) => dailyUpdates.find(u => u.studentId === sid && u.date === selectedDate && (u.subjectId === 'all' || u.subjectId === selectedSubject));
   const getGrade = (eid, sid) => grades.find(g => g.examId === eid && g.studentId === sid)?.score ?? '';
   const getExamAverage = (eid) => {
     const sids = filteredStudents.map(s=>s.id);
@@ -464,7 +495,6 @@ const App = () => {
   }, [logs, dailyReports, selectedDate, selectedSubject, classFilter, filteredStudents]);
 
   const dismissalReport = useMemo(() => {
-    const justifiedSet = new Set(dailyUpdates.map(u => `${u.studentId}_${u.date}`));
     const activeLessonsSet = new Set();
     
     dailyReports.forEach(r => {
@@ -486,7 +516,9 @@ const App = () => {
       .filter(s => dismissalClassFilter === 'all' || s.classId === dismissalClassFilter)
       .map(student => {
         const sLogs = logs.filter(l => l.studentId === student.id && l.date >= reportRange.start && l.date <= reportRange.end);
-        const validLogs = sLogs.filter(l => !justifiedSet.has(`${l.studentId}_${l.date}`));
+        
+        // סינון הלוגים רק לאלו שאין להם אישור (או אישור כללי או אישור לאותו מקצוע)
+        const validLogs = sLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId)));
         const penalty = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
         
         let mins = (13 * 60) + penalty;
@@ -526,7 +558,7 @@ const App = () => {
   const statsData = useMemo(() => {
     const subjectStats = subjects.map(sub => {
       const subLogs = logs.filter(l => l.subjectId === sub.id && l.date >= reportRange.start && l.date <= reportRange.end);
-      const validLogs = subLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date));
+      const validLogs = subLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId)));
       const total = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
       return { id: sub.id, name: sub.name, total, count: validLogs.length };
     }).sort((a, b) => b.total - a.total);
@@ -534,7 +566,7 @@ const App = () => {
     const classStats = classes.map(cls => {
       const sids = students.filter(s => s.classId === cls.id).map(s => s.id);
       const cLogs = logs.filter(l => sids.includes(l.studentId) && l.date >= reportRange.start && l.date <= reportRange.end);
-      const validLogs = cLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date));
+      const validLogs = cLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId)));
       const total = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
       const avg = sids.length ? total / sids.length : 0;
       return { id: cls.id, name: cls.name, total, avg, count: sids.length };
@@ -674,7 +706,7 @@ const App = () => {
         <Header title="נוכחות" icon={School} color="text-indigo-700" />
         <div className="mb-6"><nav className="flex bg-white p-1 rounded-xl shadow-sm border overflow-x-auto whitespace-nowrap">
           <button onClick={()=>setActiveTab('attendance')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab==='attendance'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><Calendar size={18}/><span>רישום</span></button>
-          {userRole==='admin' && <><button onClick={()=>setActiveTab('admin_updates')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab==='admin_updates'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><MessageSquare size={18}/><span>אישורים</span></button><button onClick={()=>setActiveTab('missing_reports')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='missing_reports'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><ListX size={18}/><span>בקרה</span></button><button onClick={()=>setActiveTab('dismissal')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='dismissal'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><LogOut size={18}/><span>יציאה</span></button><button onClick={()=>setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='stats'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><BarChart3 size={18}/><span>סטטיסטיקה</span></button><button onClick={()=>setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='settings'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><Users size={18}/><span>ניהול</span></button></>}
+          {userRole==='admin' && <><button onClick={()=>setActiveTab('admin_updates')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab==='admin_updates'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><MessageSquare size={18}/><span>אישורים</span></button><button onClick={()=>setActiveTab('shabbat')} className={`flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap ${activeTab==='shabbat'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><Home size={18}/><span>שבתות</span></button><button onClick={()=>setActiveTab('missing_reports')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='missing_reports'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><ListX size={18}/><span>בקרה</span></button><button onClick={()=>setActiveTab('dismissal')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='dismissal'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><LogOut size={18}/><span>יציאה</span></button><button onClick={()=>setActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='stats'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><BarChart3 size={18}/><span>סטטיסטיקה</span></button><button onClick={()=>setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab==='settings'?'bg-indigo-600 text-white':'hover:bg-slate-100'}`}><Users size={18}/><span>ניהול</span></button></>}
         </nav></div>
 
         {activeTab === 'attendance' && (
@@ -700,6 +732,48 @@ const App = () => {
             )}
 
             <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto"><table className="w-full text-sm md:text-base"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">סטטוס</th></tr></thead><tbody className="divide-y">{filteredStudents.length>0 ? filteredStudents.map(s=>{ const l=getLog(s.id); const u=getDailyUpdate(s.id); return <tr key={s.id} className="hover:bg-slate-50"><td className="px-6 py-4"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{getClassName(s.classId)}</div></td><td className="px-6 py-4"><div className="flex justify-center gap-2">{u?<div className={`px-4 py-2 rounded-xl border flex items-center gap-2 font-bold w-full justify-center ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.bg} ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.color}`}><CheckCircle size={16}/>{u.reason} (מאושר)</div>:<><div className={`flex items-center gap-1 p-1 rounded-xl border ${l?.status==='late'?'bg-amber-100 border-amber-500 text-amber-800':'bg-white border-slate-200'}`}><button onClick={()=>updateAttendance(s.id,'late',l?.status==='late'?l.minutes:5)} className="p-1"><Clock size={18}/></button><input type="number" placeholder="דק'" value={l?.status==='late'?l.minutes:''} onChange={(e)=>updateAttendance(s.id,'late',parseInt(e.target.value)||0)} className="w-10 bg-transparent text-center font-bold"/></div><button onClick={()=>updateAttendance(s.id,'absent')} className={`p-2 rounded-xl border ${l?.status==='absent'?'bg-red-100 border-red-500':'bg-white'}`}><XCircle size={18}/></button>{l && <button onClick={()=>updateAttendance(s.id,null)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"><RotateCcw size={18}/></button>}</>}</div></td></tr> }) : <tr><td colSpan="2" className="p-8 text-center text-slate-400">אין תלמידים / בחר כיתה ומקצוע</td></tr>}</tbody></table></div>
+          </div>
+        )}
+
+        {userRole === 'admin' && activeTab === 'shabbat' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-4">
+               <h2 className="text-xl font-bold flex items-center gap-2"><Home className="text-indigo-600"/> אישורי שבת מחוץ לישיבה</h2>
+               
+               <div className="space-y-2"><label className="text-sm font-bold block">תאריך השבת (ו' או שבת)</label><input type="date" value={shabbatDate} onChange={(e) => setShabbatDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(shabbatDate)}</div></div>
+               
+               <div className="space-y-2"><label className="text-sm font-bold block">סינון כיתה</label><select value={shabbatClassFilter} onChange={(e) => {setShabbatClassFilter(e.target.value); setShabbatStudentId('');}} className="w-full p-2 border rounded-lg"><option value="all">כל הכיתות</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+               
+               <div className="space-y-2">
+                 <label className="text-sm font-bold block">תלמיד</label>
+                 <div className="relative">
+                   <Search size={16} className="absolute top-3 left-3 text-slate-400" />
+                   <input 
+                      type="text" 
+                      placeholder="חפש תלמיד..." 
+                      className="w-full p-2 pl-8 mb-2 border rounded-lg text-sm bg-slate-50 focus:bg-white transition-colors"
+                      value={shabbatStudentSearch}
+                      onChange={(e) => setShabbatStudentSearch(e.target.value)}
+                   />
+                 </div>
+                 <select value={shabbatStudentId} onChange={(e) => setShabbatStudentId(e.target.value)} className="w-full p-2 border rounded-lg"><option value="">בחר...</option>
+                   {students
+                     .filter(s => shabbatClassFilter === 'all' || s.classId === shabbatClassFilter)
+                     .filter(s => s.name.includes(shabbatStudentSearch))
+                     .map(s => <option key={s.id} value={s.id}>{s.name} ({getClassName(s.classId)})</option>)
+                   }
+                 </select>
+               </div>
+
+               <button onClick={addShabbatApproval} disabled={!shabbatStudentId} className={`w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 ${shabbatStudentId ? 'bg-indigo-600' : 'bg-slate-300'}`}><CheckCircle size={18}/> אשר נסיעה לשבת</button>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col h-[500px]">
+               <h2 className="text-xl font-bold mb-4">רשימת נוסעים לשבת ({formatHebrewDate(shabbatDate)})</h2>
+               <div className="flex-1 overflow-y-auto space-y-2">
+                  {shabbatApprovals.filter(s => s.date === shabbatDate).map(app => { const st = students.find(s => s.id === app.studentId); return <div key={app.id} className="p-3 rounded-xl border bg-slate-50 flex justify-between items-center"><div><div className="font-bold">{st?.name}</div><div className="text-xs text-slate-500">{getClassName(st?.classId)}</div></div><button onClick={() => removeShabbatApproval(app.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-full"><Trash2 size={16}/></button></div> })}
+                  {!shabbatApprovals.some(s => s.date === shabbatDate) && <div className="text-center text-slate-400 mt-10">אין אישורים לשבת זו</div>}
+               </div>
+            </div>
           </div>
         )}
 
@@ -742,7 +816,13 @@ const App = () => {
                  <div className="space-y-2 flex-1"><label className="text-sm font-bold block">תאריך סיום</label><input type="date" value={newExamDate} onChange={(e) => setNewExamDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(newExamDate)}</div></div>
                </div>
                
-               <div className="space-y-2"><label className="text-sm font-bold block">סינון כיתה</label><select value={adminUpdateClassFilter} onChange={(e) => {setAdminUpdateClassFilter(e.target.value); setUpdateStudentId('');}} className="w-full p-2 border rounded-lg"><option value="all">כל הכיתות</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+               <div className="space-y-2">
+                 <label className="text-sm font-bold block">סינון כיתה</label>
+                 <select value={adminUpdateClassFilter} onChange={(e) => {setAdminUpdateClassFilter(e.target.value); setUpdateStudentId('');}} className="w-full p-2 border rounded-lg">
+                   <option value="all">כל הכיתות</option>
+                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                 </select>
+               </div>
                
                <div className="space-y-2">
                  <label className="text-sm font-bold block">תלמיד</label>
@@ -765,15 +845,23 @@ const App = () => {
                  </select>
                </div>
 
+               <div className="space-y-2">
+                 <label className="text-sm font-bold block">מקצוע / היקף</label>
+                 <select value={updateSubjectId} onChange={(e) => setUpdateSubjectId(e.target.value)} className="w-full p-2 border rounded-lg">
+                   <option value="all">כל היום</option>
+                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                 </select>
+               </div>
+
                <div className="space-y-2"><label className="text-sm font-bold block">סיבה</label><div className="grid grid-cols-2 gap-2">{ABSENCE_REASONS.map(r => <button key={r.label} onClick={() => setUpdateReason(r.label)} className={`p-2 rounded-lg text-xs font-bold flex items-center gap-2 border ${updateReason === r.label ? `${r.bg} ${r.color} border-current` : 'bg-slate-50'}`}><r.icon size={14}/>{r.label}</button>)}</div></div>
                {updateReason === 'אחר' && <input type="text" value={customUpdateReason || ''} onChange={(e) => setCustomUpdateReason(e.target.value)} placeholder="פרט סיבה..." className="w-full p-2 text-sm border rounded-lg" />}
-               <button onClick={addDailyUpdate} disabled={!updateStudentId} className={`w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 ${updateStudentId ? 'bg-indigo-600' : 'bg-slate-300'}`}><CheckCircle size={18}/> אשר</button>
+               <button onClick={addDailyUpdate} disabled={!updateStudentId} className={`w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 ${updateStudentId ? 'bg-indigo-600' : 'bg-slate-300'}`}><CheckCircle size={18}/> אשר היעדרות</button>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col h-[500px]">
                <h2 className="text-xl font-bold mb-4">רשימת אישורים ({formatHebrewDate(selectedDate)})</h2>
                <div className="flex-1 overflow-y-auto space-y-2">
-                  {dailyUpdates.filter(u => u.date === selectedDate).map(u => { const st = students.find(s => s.id === u.studentId); return <div key={u.id} className="p-3 rounded-xl border bg-slate-50 flex justify-between items-center"><div><div className="font-bold">{st?.name}</div><div className="text-xs text-slate-500">{u.reason}</div></div><button onClick={() => removeUpdate(u.id)} className="text-red-500"><Trash2 size={16}/></button></div> })}
-                  {!dailyUpdates.some(u => u.date === selectedDate) && <div className="text-center text-slate-400 mt-10">אין אישורים</div>}
+                  {dailyUpdates.filter(u => u.date === selectedDate).map(u => { const st = students.find(s => s.id === u.studentId); return <div key={u.id} className="p-3 rounded-xl border bg-slate-50 flex justify-between items-center"><div><div className="font-bold">{st?.name}</div><div className="text-xs text-slate-500">{u.reason} • {u.subjectId === 'all' ? 'כל היום' : getSubjectName(u.subjectId)}</div></div><button onClick={() => removeUpdate(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-full"><Trash2 size={16}/></button></div> })}
+                  {!dailyUpdates.some(u => u.date === selectedDate) && <div className="text-center text-slate-400 mt-10">אין אישורים ליום זה</div>}
                </div>
             </div>
           </div>
@@ -844,7 +932,7 @@ const App = () => {
                           l.date >= reportRange.start && 
                           l.date <= reportRange.end &&
                           (l.status === 'late' || l.status === 'absent') &&
-                          !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)
+                          !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId))
                         ).map((log) => (
                           <tr key={log.id}>
                             <td className="px-4 py-3"><div className="font-bold">{formatHebrewDate(log.date)}</div><div className="text-xs text-slate-400">{new Date(log.date).toLocaleDateString('he-IL')}</div></td>
@@ -866,7 +954,7 @@ const App = () => {
                         ))}
                       </tbody>
                     </table>
-                    {logs.filter(l => l.studentId === selectedStudentForDetails && l.date >= reportRange.start && l.date <= reportRange.end && (l.status === 'late' || l.status === 'absent') && !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)).length === 0 && (
+                    {logs.filter(l => l.studentId === selectedStudentForDetails && l.date >= reportRange.start && l.date <= reportRange.end && (l.status === 'late' || l.status === 'absent') && !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId))).length === 0 && (
                       <div className="p-8 text-center text-slate-400">אין אירועים חריגים בטווח זה</div>
                     )}
                   </div>
