@@ -58,12 +58,11 @@ import {
   setDoc, 
   deleteDoc, 
   onSnapshot,
-  query
+  query,
+  where // הוספנו את where לצורך סינון נתונים יעיל
 } from "firebase/firestore";
 
 // --- Firebase Configuration ---
-// הקוד מנסה למשוך את ההגדרות מקובץ .env (עבור המחשב שלך)
-// אם הוא לא מוצא (כמו כאן בתצוגה), הוא משתמש בברירת מחדל
 let firebaseConfig;
 try {
   // @ts-ignore
@@ -87,7 +86,6 @@ try {
   // התעלם משגיאות אם import.meta לא קיים
 }
 
-// Fallback לסביבת התצוגה (Canvas)
 if (!firebaseConfig && typeof __firebase_config !== 'undefined') {
     firebaseConfig = JSON.parse(__firebase_config);
 }
@@ -119,7 +117,7 @@ const App = () => {
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [assignments, setAssignments] = useState([]); // Links Teacher -> Class -> Subject
+  const [assignments, setAssignments] = useState([]); 
   const [logs, setLogs] = useState([]);
   const [exams, setExams] = useState([]);
   const [grades, setGrades] = useState([]);
@@ -140,21 +138,21 @@ const App = () => {
   const [selectedStudentForDetails, setSelectedStudentForDetails] = useState(null);
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [newExamTitle, setNewExamTitle] = useState('');
-  const [newExamDetails, setNewExamDetails] = useState(''); // שדה חדש: פירוט מבחן
+  const [newExamDetails, setNewExamDetails] = useState(''); 
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Admin Updates UI
   const [updateStudentId, setUpdateStudentId] = useState('');
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
-  const [updateStudentSearch, setUpdateStudentSearch] = useState(''); // שדה חדש: חיפוש באישור
+  const [updateStudentSearch, setUpdateStudentSearch] = useState(''); 
 
   // Inputs
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('');
-  const [studentManagementSearch, setStudentManagementSearch] = useState(''); // שדה חדש: חיפוש בניהול
+  const [studentManagementSearch, setStudentManagementSearch] = useState(''); 
   const [newSubjectName, setNewSubjectName] = useState('');
-  const [newSubjectDuration, setNewSubjectDuration] = useState(45); // NEW: Duration input
+  const [newSubjectDuration, setNewSubjectDuration] = useState(45);
   const [newClassName, setNewClassName] = useState('');
   const [newClassPassword, setNewClassPassword] = useState(''); 
   const [newTeacherName, setNewTeacherName] = useState('');
@@ -163,9 +161,9 @@ const App = () => {
   const [assignClass, setAssignClass] = useState('');
   const [assignSubject, setAssignSubject] = useState('');
 
-  // Report Range
+  // Report Range - שונה לחודש אחורה כברירת מחדל
   const defaultStartDate = new Date();
-  defaultStartDate.setDate(defaultStartDate.getDate() - 14);
+  defaultStartDate.setMonth(defaultStartDate.getMonth() - 1); 
   const [reportRange, setReportRange] = useState({
     start: defaultStartDate.toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
@@ -196,19 +194,43 @@ const App = () => {
     return () => { unsubscribe(); window.removeEventListener('online', () => setIsOffline(false)); window.removeEventListener('offline', () => setIsOffline(true)); };
   }, []);
 
-  // Sync Data
+  // 1. Sync Static Data (טעינת נתונים קבועים)
   useEffect(() => {
     if (!user) return;
     const basePath = `artifacts/${appId}/public/data`;
     const sub = (colName, setter) => onSnapshot(collection(db, basePath, colName), (snap) => setter(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => console.error("Sync error:", err));
     const unsubs = [
-      sub('classes', setClasses), sub('students', setStudents), sub('subjects', setSubjects), sub('teachers', setTeachers), sub('assignments', setAssignments),
-      sub('logs', setLogs), sub('exams', setExams), sub('grades', setGrades), sub('updates', setDailyUpdates), sub('daily_reports', setDailyReports),
+      sub('classes', setClasses), sub('students', setStudents), sub('subjects', setSubjects), sub('teachers', setTeachers), sub('assignments', setAssignments), sub('exams', setExams), sub('grades', setGrades),
       onSnapshot(doc(db, basePath, 'settings', 'global'), (doc) => { if (doc.exists()) setGlobalSettings(doc.data()); else setDoc(doc.ref, { adminPassword: '1234' }); })
     ];
     setTimeout(() => setDataLoaded(true), 1500);
     return () => unsubs.forEach(fn => fn());
   }, [user]);
+
+  // 2. Sync Dynamic Data (טעינת נתוני נוכחות מותאמת ביצועים)
+  useEffect(() => {
+    if (!user) return;
+    const basePath = `artifacts/${appId}/public/data`;
+
+    // קביעת התאריך ממנו נמשוך נתונים כדי למנוע העמסה
+    let startDateStr = selectedDate;
+    if (userRole === 'admin') {
+       // למנהל: תמיד לקחת את המוקדם מבין "תחילת טווח הסטטיסטיקה" לבין "היום הנבחר למעקב"
+       startDateStr = reportRange.start < selectedDate ? reportRange.start : selectedDate;
+    }
+
+    // שימוש בשאילתה בודדת (Single Condition) המאפשרת סינון ראשוני מהיר וחוסכת תעבורת רשת
+    const qLogs = query(collection(db, basePath, 'logs'), where('date', '>=', startDateStr));
+    const qUpdates = query(collection(db, basePath, 'updates'), where('date', '>=', startDateStr));
+    const qReports = query(collection(db, basePath, 'daily_reports'), where('date', '>=', startDateStr));
+
+    const unsubs = [
+      onSnapshot(qLogs, (snap) => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })))),
+      onSnapshot(qUpdates, (snap) => setDailyUpdates(snap.docs.map(d => ({ id: d.id, ...d.data() })))),
+      onSnapshot(qReports, (snap) => setDailyReports(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+    ];
+    return () => unsubs.forEach(fn => fn());
+  }, [user, userRole, selectedDate, reportRange.start]);
 
   useEffect(() => { if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); }, [subjects, selectedSubject]);
 
@@ -223,7 +245,6 @@ const App = () => {
     return teachers.find(t => t.id === id)?.name || 'לא ידוע';
   };
   
-  // פונקציה לחישוב מספר התלמידים בכיתה
   const getStudentCountInClass = (classId) => students.filter(s => s.classId === classId).length;
 
   const toGematria = (num) => {
@@ -289,7 +310,6 @@ const App = () => {
     if (classFilter !== 'all') relevantClasses = classes.filter(c => c.id === classFilter);
     const relevantClassIds = relevantClasses.map(c => c.id);
     
-    // מיון לפי א' ב' כברירת מחדל
     return students
       .filter(s => relevantClassIds.includes(s.classId))
       .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
@@ -328,7 +348,6 @@ const App = () => {
     .sort((a, b) => a.className.localeCompare(b.className, 'he')); 
   }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
 
-
   // --- Actions ---
   const addClass = () => { if(newClassName.trim()){ const id=crypto.randomUUID(); saveDoc('classes',id,{name:newClassName.trim()}); setNewClassName(''); } };
   const addStudent = () => { if(newStudentName.trim()&&newStudentClass){ const id=crypto.randomUUID(); saveDoc('students',id,{name:newStudentName.trim(),classId:newStudentClass}); setNewStudentName(''); } };
@@ -347,7 +366,6 @@ const App = () => {
   
   const assignTeacherToClass = () => { 
     if (assignClass && assignSubject) { 
-        // Allow admin/no-teacher assignment by defaulting to 'admin' if empty
         const tId = assignTeacher || 'admin';
         const exists = assignments.find(a => a.teacherId === tId && a.classId === assignClass && a.subjectId === assignSubject);
         if (!exists) { 
@@ -376,7 +394,6 @@ const App = () => {
   };
 
   const markAsReported = () => {
-    // Allows admin to also mark as reported if a specific class is selected
     if (selectedSubject && classFilter !== 'all') {
        const reporterId = loggedInTeacherId || 'admin';
        const id = `report_${selectedDate}_${classFilter}_${selectedSubject}`;
@@ -448,19 +465,14 @@ const App = () => {
 
   const dismissalReport = useMemo(() => {
     const justifiedSet = new Set(dailyUpdates.map(u => `${u.studentId}_${u.date}`));
-    
-    // 1. Map active lessons (Class + Date + Subject) based on reports AND logs
-    // This ensures that if a log exists (even without teacher assignment), the lesson counts as "Potential"
     const activeLessonsSet = new Set();
     
-    // Add from "All Present" reports
     dailyReports.forEach(r => {
       if (r.date >= reportRange.start && r.date <= reportRange.end) {
         activeLessonsSet.add(`${r.classId}_${r.date}_${r.subjectId}`);
       }
     });
 
-    // Add from individual Logs (Penalties)
     logs.forEach(l => {
       if (l.date >= reportRange.start && l.date <= reportRange.end) {
         const student = students.find(s => s.id === l.studentId);
@@ -478,18 +490,13 @@ const App = () => {
         const penalty = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
         
         let mins = (13 * 60) + penalty;
-        
-        // --- PERCENTAGE CALCULATION START ---
         let totalPotentialMinutes = 0;
         
         const start = new Date(reportRange.start);
         const end = new Date(reportRange.end);
         
-        // Iterate days in range
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
            const dStr = d.toISOString().split('T')[0];
-           
-           // Check against ALL subjects to see if a lesson occurred for this student's class
            subjects.forEach(sub => {
               if (activeLessonsSet.has(`${student.classId}_${dStr}_${sub.id}`)) {
                 totalPotentialMinutes += (sub.duration || 45);
@@ -499,7 +506,6 @@ const App = () => {
         
         const presentMinutes = Math.max(0, totalPotentialMinutes - penalty);
         const percentage = totalPotentialMinutes > 0 ? Math.round((presentMinutes / totalPotentialMinutes) * 100) : 100;
-        // --- PERCENTAGE CALCULATION END ---
 
         if (penalty === 0 && totalPotentialMinutes === 0) return null;
         if (penalty === 0) return { 
@@ -697,7 +703,6 @@ const App = () => {
           </div>
         )}
 
-        {/* Missing Reports Tab (NEW) */}
         {userRole === 'admin' && activeTab === 'missing_reports' && (
           <div className="space-y-6">
             <div className="bg-indigo-900 text-white p-6 rounded-2xl shadow-lg">
@@ -832,7 +837,7 @@ const App = () => {
 
                   <div className="p-0 overflow-y-auto flex-1">
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-50 text-slate-500 sticky top-0"><tr><th className="px-4 py-3 text-right">תאריך</th><th className="px-4 py-3 text-right">מקצוע</th><th className="px-4 py-3 text-center">סוג</th><th className="px-4 py-3 text-center">דקות</th></tr></thead>
+                      <thead className="bg-slate-50 text-slate-500 sticky top-0"><tr><th className="px-4 py-3 text-right">תאריך</th><th className="px-4 py-3 text-right">מקצוע</th><th className="px-4 py-3 text-center">סוג</th><th className="px-4 py-3 text-center">דקות</th><th className="px-4 py-3 text-center">פעולה</th></tr></thead>
                       <tbody className="divide-y">
                         {logs.filter(l => 
                           l.studentId === selectedStudentForDetails && 
@@ -840,14 +845,23 @@ const App = () => {
                           l.date <= reportRange.end &&
                           (l.status === 'late' || l.status === 'absent') &&
                           !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date)
-                        ).map((log, i) => (
-                          <tr key={i}>
+                        ).map((log) => (
+                          <tr key={log.id}>
                             <td className="px-4 py-3"><div className="font-bold">{formatHebrewDate(log.date)}</div><div className="text-xs text-slate-400">{new Date(log.date).toLocaleDateString('he-IL')}</div></td>
                             <td className="px-4 py-3">{getSubjectName(log.subjectId)}</td>
                             <td className="px-4 py-3 text-center">
                               {log.status === 'absent' ? <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">חיסור</span> : <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">איחור</span>}
                             </td>
                             <td className="px-4 py-3 text-center font-bold">{log.minutes}</td>
+                            <td className="px-4 py-3 text-center">
+                              <button 
+                                onClick={() => removeDoc('logs', log.id)} 
+                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                                title="מחק רישום"
+                              >
+                                <Trash2 size={16}/>
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
