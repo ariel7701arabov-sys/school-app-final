@@ -40,7 +40,9 @@ import {
   CheckSquare,
   Search,
   FileText,
-  PieChart
+  PieChart,
+  ChevronRight,
+  ChevronLeft
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -118,12 +120,13 @@ const App = () => {
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [assignments, setAssignments] = useState([]); 
+  const [schedules, setSchedules] = useState([]); // חדש: מערכת שעות
   const [logs, setLogs] = useState([]);
   const [exams, setExams] = useState([]);
   const [grades, setGrades] = useState([]);
   const [dailyUpdates, setDailyUpdates] = useState([]);
   const [dailyReports, setDailyReports] = useState([]); 
-  const [shabbatApprovals, setShabbatApprovals] = useState([]); // חדש: אישורי שבת
+  const [shabbatApprovals, setShabbatApprovals] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({ adminPassword: '1234' });
 
   // --- UI State ---
@@ -142,18 +145,22 @@ const App = () => {
   const [newExamDetails, setNewExamDetails] = useState(''); 
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Admin Updates UI (אישורי היעדרות)
+  // Admin Updates UI (אישורי היעדרות חדש - לוח שנה)
   const [updateStudentId, setUpdateStudentId] = useState('');
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
   const [updateStudentSearch, setUpdateStudentSearch] = useState(''); 
-  const [updateSubjectId, setUpdateSubjectId] = useState('all'); // חדש: מקצוע לאישור
+  const [absenceWeekStart, setAbsenceWeekStart] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedAbsenceSlots, setSelectedAbsenceSlots] = useState({}); // { '2024-10-25': ['subId1', 'subId2'] או ['all'] }
 
-  // Shabbat Approvals UI (אישורי שבת)
+  // Shabbat Approvals UI
   const [shabbatDate, setShabbatDate] = useState(new Date().toISOString().split('T')[0]);
   const [shabbatClassFilter, setShabbatClassFilter] = useState('all');
   const [shabbatStudentId, setShabbatStudentId] = useState('');
   const [shabbatStudentSearch, setShabbatStudentSearch] = useState('');
+
+  // Settings UI - Timetable
+  const [scheduleClassSelection, setScheduleClassSelection] = useState('');
 
   // Inputs
   const [newStudentName, setNewStudentName] = useState('');
@@ -185,6 +192,7 @@ const App = () => {
     { label: 'שמחה משפחתית', icon: PartyPopper, color: 'text-purple-600', bg: 'bg-purple-100' },
     { label: 'אחר', icon: HelpCircle, color: 'text-slate-600', bg: 'bg-slate-100' }
   ];
+  const DAYS_OF_WEEK = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי']; // 0-5 (ראשון-שישי)
 
   // --- Firebase Init ---
   useEffect(() => {
@@ -208,7 +216,7 @@ const App = () => {
     const basePath = `artifacts/${appId}/public/data`;
     const sub = (colName, setter) => onSnapshot(collection(db, basePath, colName), (snap) => setter(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (err) => console.error("Sync error:", err));
     const unsubs = [
-      sub('classes', setClasses), sub('students', setStudents), sub('subjects', setSubjects), sub('teachers', setTeachers), sub('assignments', setAssignments), sub('exams', setExams), sub('grades', setGrades),
+      sub('classes', setClasses), sub('students', setStudents), sub('subjects', setSubjects), sub('teachers', setTeachers), sub('assignments', setAssignments), sub('exams', setExams), sub('grades', setGrades), sub('schedules', setSchedules),
       onSnapshot(doc(db, basePath, 'settings', 'global'), (doc) => { if (doc.exists()) setGlobalSettings(doc.data()); else setDoc(doc.ref, { adminPassword: '1234' }); })
     ];
     setTimeout(() => setDataLoaded(true), 1500);
@@ -322,39 +330,6 @@ const App = () => {
       .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
   }, [students, availableClasses, classFilter]);
 
-  // --- Missing Reports Logic ---
-  const missingReports = useMemo(() => {
-    return assignments.map(assign => {
-      const classStudentIds = students.filter(s => s.classId === assign.classId).map(s => s.id);
-      if (classStudentIds.length === 0) return null; 
-
-      const hasLogs = logs.some(l => 
-        l.date === selectedDate && 
-        l.subjectId === assign.subjectId && 
-        classStudentIds.includes(l.studentId)
-      );
-
-      const hasConfirmation = dailyReports.some(r => 
-        r.date === selectedDate &&
-        r.classId === assign.classId &&
-        r.subjectId === assign.subjectId &&
-        r.teacherId === assign.teacherId
-      );
-
-      if (!hasLogs && !hasConfirmation) {
-        return {
-          teacherId: assign.teacherId,
-          teacherName: getTeacherName(assign.teacherId),
-          className: getClassName(assign.classId),
-          subjectName: getSubjectName(assign.subjectId)
-        };
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.className.localeCompare(b.className, 'he')); 
-  }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
-
   // --- Actions ---
   const addClass = () => { if(newClassName.trim()){ const id=crypto.randomUUID(); saveDoc('classes',id,{name:newClassName.trim()}); setNewClassName(''); } };
   const addStudent = () => { if(newStudentName.trim()&&newStudentClass){ const id=crypto.randomUUID(); saveDoc('students',id,{name:newStudentName.trim(),classId:newStudentClass}); setNewStudentName(''); } };
@@ -389,6 +364,13 @@ const App = () => {
   const removeSubject = (id) => removeDoc('subjects', id);
   const updateAdminPassword = (p) => saveDoc('settings', 'global', { adminPassword: p });
 
+  const addScheduleItem = (classId, dayOfWeek, subjectId) => {
+    if (!classId || dayOfWeek === null || !subjectId) return;
+    const id = crypto.randomUUID();
+    saveDoc('schedules', id, { classId, dayOfWeek, subjectId });
+  };
+  const removeScheduleItem = (id) => removeDoc('schedules', id);
+
   const updateAttendance = (studentId, status, minutes = 0) => {
     const id = `log_${selectedDate}_${studentId}_${selectedSubject}`;
     if (status === null) removeDoc('logs', id);
@@ -415,30 +397,28 @@ const App = () => {
     }
   };
 
+  // לוגיקה חדשה לשמירת אישורים לפי הלוח שנה
   const addDailyUpdate = async () => {
-    if (updateStudentId && updateReason && selectedDate && newExamDate) {
+    if (updateStudentId && updateReason && Object.keys(selectedAbsenceSlots).length > 0) {
       const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
       
-      const start = new Date(selectedDate);
-      const end = new Date(newExamDate);
-      
-      // יצירת מסמך לכל יום בטווח
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dStr = d.toISOString().split('T')[0];
-        const id = `update_${dStr}_${updateStudentId}_${updateSubjectId}`;
-        await saveDoc('updates', id, { 
-          studentId: updateStudentId, 
-          date: dStr, 
-          subjectId: updateSubjectId, // יכול להיות 'all' או ID של מקצוע
-          reason: finalReason 
-        });
+      for (const [dateStr, selectedSubjects] of Object.entries(selectedAbsenceSlots)) {
+        if (selectedSubjects.includes('all')) {
+          const id = `update_${dateStr}_${updateStudentId}_all`;
+          await saveDoc('updates', id, { studentId: updateStudentId, date: dateStr, subjectId: 'all', reason: finalReason });
+        } else {
+          for (const subjId of selectedSubjects) {
+            const id = `update_${dateStr}_${updateStudentId}_${subjId}`;
+            await saveDoc('updates', id, { studentId: updateStudentId, date: dateStr, subjectId: subjId, reason: finalReason });
+          }
+        }
       }
 
       setUpdateStudentId('');
       setCustomUpdateReason('');
       setUpdateReason('חולה');
       setUpdateStudentSearch(''); 
-      setUpdateSubjectId('all');
+      setSelectedAbsenceSlots({});
     }
   };
   const removeUpdate = (id) => removeDoc('updates', id);
@@ -457,43 +437,88 @@ const App = () => {
   };
   const removeShabbatApproval = (id) => removeDoc('shabbat_approvals', id);
 
-  const addExam = () => { 
-    if (newExamTitle.trim() && selectedSubject) { 
-      const id = crypto.randomUUID(); 
-      saveDoc('exams', id, { 
-        title: newExamTitle.trim(), 
-        details: newExamDetails.trim(), 
-        subjectId: selectedSubject, 
-        date: newExamDate 
-      }); 
-      setNewExamTitle(''); 
-      setNewExamDetails('');
-    } 
-  };
-  const deleteExam = (id) => { removeDoc('exams', id); if(selectedExamId===id) setSelectedExamId(null); };
-  const updateGrade = (eid, sid, val) => { 
-    const id=`grade_${eid}_${sid}`; 
-    if(val==='') removeDoc('grades', id); 
-    else { const s=parseInt(val); if(s>=0&&s<=100) saveDoc('grades',id,{examId:eid,studentId:sid,score:s}); } 
+  // --- Visual Calendar Logic for Approvals ---
+  const toggleDayAbsence = (dateStr) => {
+    setSelectedAbsenceSlots(prev => {
+        if (prev[dateStr]?.includes('all')) {
+            const newState = {...prev};
+            delete newState[dateStr];
+            return newState;
+        } else {
+            return { ...prev, [dateStr]: ['all'] };
+        }
+    });
   };
 
-  // --- Getters & Reports ---
+  const toggleSubjectAbsence = (dateStr, subjectId, currentStudentClassId) => {
+    setSelectedAbsenceSlots(prev => {
+        let current = prev[dateStr] || [];
+        
+        if (current.includes('all')) {
+            // אם היה "הכל" ולחצו על שיעור כדי לבטל, נהפוך את זה לרשימה של שאר השיעורים
+            const dayOfWeek = new Date(dateStr).getDay();
+            const subjectsThatDay = schedules.filter(s => s.classId === currentStudentClassId && s.dayOfWeek === dayOfWeek).map(s => s.subjectId);
+            current = subjectsThatDay.filter(id => id !== subjectId);
+        } else if (current.includes(subjectId)) {
+            current = current.filter(id => id !== subjectId);
+        } else {
+            current = [...current, subjectId];
+        }
+
+        if (current.length === 0) {
+            const newState = {...prev};
+            delete newState[dateStr];
+            return newState;
+        }
+        return { ...prev, [dateStr]: current };
+    });
+  };
+
+  const getCalendarDays = () => {
+    return Array.from({length: 7}).map((_, i) => {
+      const d = new Date(absenceWeekStart);
+      d.setDate(d.getDate() + i);
+      return d;
+    });
+  };
+
+  // --- Reports ---
+  const missingReports = useMemo(() => {
+    return assignments.map(assign => {
+      const classStudentIds = students.filter(s => s.classId === assign.classId).map(s => s.id);
+      if (classStudentIds.length === 0) return null; 
+
+      const hasLogs = logs.some(l => 
+        l.date === selectedDate && 
+        l.subjectId === assign.subjectId && 
+        classStudentIds.includes(l.studentId)
+      );
+
+      const hasConfirmation = dailyReports.some(r => 
+        r.date === selectedDate &&
+        r.classId === assign.classId &&
+        r.subjectId === assign.subjectId &&
+        r.teacherId === assign.teacherId
+      );
+
+      if (!hasLogs && !hasConfirmation) {
+        return {
+          teacherId: assign.teacherId,
+          teacherName: getTeacherName(assign.teacherId),
+          className: getClassName(assign.classId),
+          subjectName: getSubjectName(assign.subjectId)
+        };
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.className.localeCompare(b.className, 'he')); 
+  }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
+
+
   const getLog = (sid) => logs.find(l => l.date === selectedDate && l.subjectId === selectedSubject && l.studentId === sid);
   const getDailyUpdate = (sid) => dailyUpdates.find(u => u.studentId === sid && u.date === selectedDate && (u.subjectId === 'all' || u.subjectId === selectedSubject));
-  const getGrade = (eid, sid) => grades.find(g => g.examId === eid && g.studentId === sid)?.score ?? '';
-  const getExamAverage = (eid) => {
-    const sids = filteredStudents.map(s=>s.id);
-    const gs = grades.filter(g=>g.examId===eid && sids.includes(g.studentId));
-    return gs.length ? (gs.reduce((a,c)=>a+c.score,0)/gs.length).toFixed(1) : 0;
-  };
   
-  const isCurrentViewReported = useMemo(() => {
-    if (classFilter === 'all' || !selectedSubject) return false;
-    const hasLogs = logs.some(l => l.date === selectedDate && l.subjectId === selectedSubject && filteredStudents.map(s=>s.id).includes(l.studentId));
-    const hasReportDoc = dailyReports.some(r => r.date === selectedDate && r.classId === classFilter && r.subjectId === selectedSubject);
-    return hasLogs || hasReportDoc;
-  }, [logs, dailyReports, selectedDate, selectedSubject, classFilter, filteredStudents]);
-
   const dismissalReport = useMemo(() => {
     const activeLessonsSet = new Set();
     
@@ -574,34 +599,6 @@ const App = () => {
     return { subjectStats, classStats };
   }, [logs, subjects, classes, students, reportRange, dailyUpdates]);
 
-  const gradesStatsData = useMemo(() => {
-    const subjectStats = subjects.map(sub => {
-      const subExams = exams.filter(e => e.subjectId === sub.id);
-      const subExamIds = subExams.map(e => e.id);
-      const subGrades = grades.filter(g => subExamIds.includes(g.examId));
-      const totalScore = subGrades.reduce((acc, curr) => acc + curr.score, 0);
-      const avg = subGrades.length > 0 ? (totalScore / subGrades.length) : 0;
-      return { id: sub.id, name: sub.name, avg, count: subGrades.length };
-    }).filter(s => s.count > 0).sort((a, b) => b.avg - a.avg);
-
-    const classStats = classes.map(cls => {
-      const sids = students.filter(s => s.classId === cls.id).map(s => s.id);
-      const cGrades = grades.filter(g => sids.includes(g.studentId));
-      const totalScore = cGrades.reduce((acc, curr) => acc + curr.score, 0);
-      const avg = cGrades.length > 0 ? (totalScore / cGrades.length) : 0;
-      return { id: cls.id, name: cls.name, avg, count: cGrades.length };
-    }).filter(Boolean).filter(s => s.count > 0).sort((a, b) => b.avg - a.avg);
-    
-    const bestSubject = subjectStats.length ? subjectStats[0] : null;
-    const bestClass = classStats.length ? classStats[0] : null;
-
-    return { subjectStats, classStats, bestSubject, bestClass };
-  }, [exams, grades, subjects, classes, students]);
-
-  const filteredExams = useMemo(() => {
-    return exams.filter(e => e.subjectId === selectedSubject);
-  }, [exams, selectedSubject]);
-
   // --- Auth Handlers ---
   const handleAuth = () => {
     setLoginError(false);
@@ -654,51 +651,7 @@ const App = () => {
     <header className="mb-8 flex justify-between items-center"><div className="flex items-center gap-4"><button onClick={()=>setCurrentView('menu')} className="bg-white p-2 rounded-full shadow-sm"><ArrowLeft size={20}/></button><div><h1 className={`text-3xl font-bold flex items-center gap-2 ${color}`}><Icon className="opacity-80"/>{title}</h1><p className="text-slate-500 text-sm">{userRole==='admin'?'מנהל':getTeacherName(loggedInTeacherId)}</p></div></div></header>
   );
 
-  if (currentView === 'grades') return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no" style={{ backgroundImage: "url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
-      <div className="absolute inset-0 bg-slate-50/90 z-0"></div>
-      <div className="relative z-10 max-w-5xl mx-auto"><Header title="ציונים" icon={GraduationCap} color="text-emerald-700" />
-        <div className="mb-6 flex"><nav className="flex bg-white p-1 rounded-xl shadow-sm border overflow-x-auto"><button onClick={()=>setGradesActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${gradesActiveTab==='input'?'bg-emerald-600 text-white':'hover:bg-slate-100'}`}><ClipboardList size={18}/><span>הזנה</span></button>{userRole==='admin'&&<button onClick={()=>setGradesActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${gradesActiveTab==='stats'?'bg-emerald-600 text-white':'hover:bg-slate-100'}`}><BarChart3 size={18}/><span>סטטיסטיקה</span></button>}</nav></div>
-        {gradesActiveTab === 'input' ? (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col md:flex-row gap-4 items-end">
-              {userRole==='admin' && <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">כיתה</label><select value={classFilter} onChange={(e)=>setClassFilter(e.target.value)} className="w-full p-2 border rounded-lg"><option value="all">הכל</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-              <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">מקצוע</label><select value={selectedSubject} onChange={(e)=>{setSelectedSubject(e.target.value);setSelectedExamId(null);}} className="w-full p-2 border rounded-lg">{availableSubjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-              {userRole==='teacher' && <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">כיתה</label><select value={classFilter} onChange={(e)=>setClassFilter(e.target.value)} className="w-full p-2 border rounded-lg"><option value="all">בחר...</option>{availableClasses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="space-y-4">
-                <div className="bg-white p-4 rounded-2xl shadow-sm border">
-                   <h3 className="font-bold text-lg mb-4">מבחנים</h3>
-                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border"><input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
-                   <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
-                   <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
-                   <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
-                </div>
-              </div>
-              <div className="lg:col-span-2">
-                {selectedExamId ? <div className="bg-white rounded-2xl shadow-sm border overflow-hidden"><div className="bg-slate-50 p-4 border-b flex justify-between"><div><h3 className="font-bold text-lg">{exams.find(e=>e.id===selectedExamId)?.title}</h3><div className="text-xs text-slate-500 mt-1">{exams.find(e=>e.id===selectedExamId)?.details}</div></div><div className="text-sm bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full font-bold h-fit">ממוצע: {getExamAverage(selectedExamId)}</div></div><table className="w-full"><thead className="bg-slate-50 border-b text-sm"><tr><th className="px-6 py-3 text-right">תלמיד</th><th className="px-6 py-3 text-center w-32">ציון</th></tr></thead><tbody className="divide-y">{filteredStudents.map(s=><tr key={s.id}><td className="px-6 py-3"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{getClassName(s.classId)}</div></td><td className="px-6 py-3 text-center"><input type="number" value={getGrade(selectedExamId,s.id)} onChange={(e)=>updateGrade(selectedExamId,s.id,e.target.value)} className="w-20 text-center p-2 border rounded-lg font-bold bg-slate-50" /></td></tr>)}</tbody></table></div> : <div className="bg-white p-12 rounded-2xl border border-dashed text-center text-slate-400">בחר מבחן</div>}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 relative overflow-hidden"><div className="relative z-10"><div className="text-emerald-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> מקצוע מצטיין</div><div className="text-2xl font-black text-emerald-600 truncate">{gradesStatsData.bestSubject ? gradesStatsData.bestSubject.name : '---'}</div><div className="text-xs text-emerald-500 mt-2">{gradesStatsData.bestSubject ? `ממוצע: ${gradesStatsData.bestSubject.avg.toFixed(1)}` : 'אין נתונים'}</div></div><Trophy className="absolute -bottom-4 -left-4 text-emerald-100 w-24 h-24" /></div>
-                <div className="bg-rose-50 p-6 rounded-2xl border border-rose-100 relative overflow-hidden"><div className="relative z-10"><div className="text-rose-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע חלש</div><div className="text-2xl font-black text-rose-600 truncate">{gradesStatsData.subjectStats.length > 0 ? gradesStatsData.subjectStats[gradesStatsData.subjectStats.length - 1].name : '---'}</div><div className="text-xs text-rose-500 mt-2">{gradesStatsData.subjectStats.length > 0 ? `ממוצע: ${gradesStatsData.subjectStats[gradesStatsData.subjectStats.length - 1].avg.toFixed(1)}` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-rose-100 w-24 h-24" /></div>
-                <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 relative overflow-hidden"><div className="relative z-10"><div className="text-blue-800 font-bold mb-1 flex items-center gap-2"><School size={18}/> כיתה מצטיינת</div><div className="text-2xl font-black text-blue-600 truncate">{gradesStatsData.bestClass ? gradesStatsData.bestClass.name : '---'}</div><div className="text-xs text-blue-500 mt-2">{gradesStatsData.bestClass ? `ממוצע: ${gradesStatsData.bestClass.avg.toFixed(1)}` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-blue-100 w-24 h-24" /></div>
-                <div className="bg-orange-50 p-6 rounded-2xl border border-orange-100 relative overflow-hidden"><div className="relative z-10"><div className="text-orange-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה לשיפור</div><div className="text-2xl font-black text-orange-600 truncate">{gradesStatsData.classStats.length > 0 ? gradesStatsData.classStats[gradesStatsData.classStats.length - 1].name : '---'}</div><div className="text-xs text-orange-500 mt-2">{gradesStatsData.classStats.length > 0 ? `ממוצע: ${gradesStatsData.classStats[gradesStatsData.classStats.length - 1].avg.toFixed(1)}` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-orange-100 w-24 h-24" /></div>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div className="p-4 border-b border-slate-100 font-bold text-slate-700">דירוג מקצועות</div><table className="w-full text-sm overflow-x-auto"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">ממוצע</th><th className="p-3 text-center">ציונים</th></tr></thead><tbody className="divide-y divide-slate-100">{gradesStatsData.subjectStats.map((sub, idx) => (<tr key={sub.id}><td className="p-3 font-medium">{sub.name}</td><td className="p-3 text-center font-bold">{sub.avg.toFixed(1)}</td><td className="p-3 text-center">{sub.count}</td></tr>))}</tbody></table></div>
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div className="p-4 border-b border-slate-100 font-bold text-slate-700">דירוג כיתות</div><table className="w-full text-sm overflow-x-auto"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע</th><th className="p-3 text-center">ציונים</th></tr></thead><tbody className="divide-y divide-slate-100">{gradesStatsData.classStats.map((cls, idx) => (<tr key={cls.id}><td className="p-3 font-medium">{cls.name}</td><td className="p-3 text-center font-bold">{cls.avg.toFixed(1)}</td><td className="p-3 text-center">{cls.count}</td></tr>))}</tbody></table></div>
-             </div>
-          </div>
-        )}
-      </div></div>
-  );
-
-  // --- Attendance Views ---
+  // --- Main App Returns ---
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no" style={{ backgroundImage: "url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
       <div className="absolute inset-0 bg-slate-50/90 z-0"></div>
@@ -807,61 +760,100 @@ const App = () => {
         )}
 
         {userRole === 'admin' && activeTab === 'admin_updates' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-4">
-               <h2 className="text-xl font-bold flex items-center gap-2"><MessageSquare className="text-indigo-600"/> אישור היעדרות</h2>
-               
-               <div className="flex gap-2">
-                 <div className="space-y-2 flex-1"><label className="text-sm font-bold block">תאריך התחלה</label><input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(selectedDate)}</div></div>
-                 <div className="space-y-2 flex-1"><label className="text-sm font-bold block">תאריך סיום</label><input type="date" value={newExamDate} onChange={(e) => setNewExamDate(e.target.value)} className="w-full p-2 border rounded-lg" /><div className="text-xs text-indigo-600 font-bold">{formatHebrewDate(newExamDate)}</div></div>
+               <div className="flex justify-between items-center">
+                 <h2 className="text-xl font-bold flex items-center gap-2"><MessageSquare className="text-indigo-600"/> יצירת אישור היעדרות מתקדם</h2>
                </div>
                
-               <div className="space-y-2">
-                 <label className="text-sm font-bold block">סינון כיתה</label>
-                 <select value={adminUpdateClassFilter} onChange={(e) => {setAdminUpdateClassFilter(e.target.value); setUpdateStudentId('');}} className="w-full p-2 border rounded-lg">
-                   <option value="all">כל הכיתות</option>
-                   {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                 </select>
-               </div>
-               
-               <div className="space-y-2">
-                 <label className="text-sm font-bold block">תלמיד</label>
-                 <div className="relative">
-                   <Search size={16} className="absolute top-3 left-3 text-slate-400" />
-                   <input 
-                      type="text" 
-                      placeholder="חפש תלמיד..." 
-                      className="w-full p-2 pl-8 mb-2 border rounded-lg text-sm bg-slate-50 focus:bg-white transition-colors"
-                      value={updateStudentSearch}
-                      onChange={(e) => setUpdateStudentSearch(e.target.value)}
-                   />
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                   <label className="text-sm font-bold block">סינון כיתה</label>
+                   <select value={adminUpdateClassFilter} onChange={(e) => {setAdminUpdateClassFilter(e.target.value); setUpdateStudentId(''); setSelectedAbsenceSlots({});}} className="w-full p-2 border rounded-lg bg-slate-50">
+                     <option value="all">כל הכיתות</option>
+                     {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                   </select>
                  </div>
-                 <select value={updateStudentId} onChange={(e) => setUpdateStudentId(e.target.value)} className="w-full p-2 border rounded-lg"><option value="">בחר...</option>
-                   {students
-                     .filter(s => adminUpdateClassFilter === 'all' || s.classId === adminUpdateClassFilter)
-                     .filter(s => s.name.includes(updateStudentSearch))
-                     .map(s => <option key={s.id} value={s.id}>{s.name} ({getClassName(s.classId)})</option>)
-                   }
-                 </select>
+                 
+                 <div className="space-y-2">
+                   <label className="text-sm font-bold block">תלמיד</label>
+                   <select value={updateStudentId} onChange={(e) => {setUpdateStudentId(e.target.value); setSelectedAbsenceSlots({});}} className="w-full p-2 border rounded-lg bg-slate-50"><option value="">בחר תלמיד...</option>
+                     {students
+                       .filter(s => adminUpdateClassFilter === 'all' || s.classId === adminUpdateClassFilter)
+                       .map(s => <option key={s.id} value={s.id}>{s.name} ({getClassName(s.classId)})</option>)
+                     }
+                   </select>
+                 </div>
                </div>
 
-               <div className="space-y-2">
-                 <label className="text-sm font-bold block">מקצוע / היקף</label>
-                 <select value={updateSubjectId} onChange={(e) => setUpdateSubjectId(e.target.value)} className="w-full p-2 border rounded-lg">
-                   <option value="all">כל היום</option>
-                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                 </select>
-               </div>
+               {updateStudentId && (
+                 <div className="mt-6 border-t pt-4">
+                   <div className="flex justify-between items-center mb-4">
+                      <label className="text-sm font-bold block">לוח אישורים (בחר ימים או מקצועות לאישור)</label>
+                      <div className="flex items-center gap-2">
+                         <button onClick={() => {const d = new Date(absenceWeekStart); d.setDate(d.getDate() - 7); setAbsenceWeekStart(d.toISOString().split('T')[0]);}} className="p-1 border rounded hover:bg-slate-50"><ChevronRight size={16}/></button>
+                         <input type="date" value={absenceWeekStart} onChange={(e) => setAbsenceWeekStart(e.target.value)} className="p-1 border rounded text-xs" />
+                         <button onClick={() => {const d = new Date(absenceWeekStart); d.setDate(d.getDate() + 7); setAbsenceWeekStart(d.toISOString().split('T')[0]);}} className="p-1 border rounded hover:bg-slate-50"><ChevronLeft size={16}/></button>
+                      </div>
+                   </div>
+                   
+                   {/* Visual Calendar */}
+                   <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
+                      {getCalendarDays().map(dayDate => {
+                        const dateStr = dayDate.toISOString().split('T')[0];
+                        const dayOfWeek = dayDate.getDay();
+                        const currentStudentClassId = students.find(s => s.id === updateStudentId)?.classId;
+                        const daySubjects = schedules.filter(s => s.classId === currentStudentClassId && s.dayOfWeek === dayOfWeek);
+                        
+                        const isAllSelected = selectedAbsenceSlots[dateStr]?.includes('all');
+                        
+                        return (
+                          <div key={dateStr} className={`snap-center min-w-[200px] border rounded-2xl overflow-hidden transition-all ${isAllSelected ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200'}`}>
+                             <div 
+                                onClick={() => toggleDayAbsence(dateStr)}
+                                className={`p-3 text-center cursor-pointer transition-colors ${isAllSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 hover:bg-slate-200'}`}
+                             >
+                                <div className="font-bold">{DAYS_OF_WEEK[dayOfWeek]}</div>
+                                <div className="text-xs opacity-80">{formatHebrewDate(dateStr)}</div>
+                                <div className="text-[10px] opacity-70 mt-1">{isAllSelected ? '(יום שלם מאושר)' : '(לחץ לאישור יום שלם)'}</div>
+                             </div>
+                             <div className="p-2 space-y-2 bg-white min-h-[120px]">
+                                {daySubjects.length === 0 && !isAllSelected && <div className="text-xs text-slate-400 text-center mt-4">אין מקצועות במערכת</div>}
+                                {daySubjects.map(sched => {
+                                  const isSubSelected = isAllSelected || selectedAbsenceSlots[dateStr]?.includes(sched.subjectId);
+                                  return (
+                                    <button
+                                      key={sched.id}
+                                      onClick={() => toggleSubjectAbsence(dateStr, sched.subjectId, currentStudentClassId)}
+                                      className={`w-full text-right p-2 rounded-lg text-xs font-bold border transition-colors flex items-center justify-between ${isSubSelected ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-slate-600 border-slate-100 hover:border-slate-300'}`}
+                                    >
+                                      <span className="truncate">{getSubjectName(sched.subjectId)}</span>
+                                      {isSubSelected && <CheckCircle size={14} className="text-indigo-500 shrink-0"/>}
+                                    </button>
+                                  )
+                                })}
+                             </div>
+                          </div>
+                        )
+                      })}
+                   </div>
+                 </div>
+               )}
 
-               <div className="space-y-2"><label className="text-sm font-bold block">סיבה</label><div className="grid grid-cols-2 gap-2">{ABSENCE_REASONS.map(r => <button key={r.label} onClick={() => setUpdateReason(r.label)} className={`p-2 rounded-lg text-xs font-bold flex items-center gap-2 border ${updateReason === r.label ? `${r.bg} ${r.color} border-current` : 'bg-slate-50'}`}><r.icon size={14}/>{r.label}</button>)}</div></div>
+               <div className="space-y-2 mt-4"><label className="text-sm font-bold block">סיבה</label><div className="grid grid-cols-2 md:grid-cols-5 gap-2">{ABSENCE_REASONS.map(r => <button key={r.label} onClick={() => setUpdateReason(r.label)} className={`p-2 rounded-lg text-xs font-bold flex flex-col items-center gap-1 border transition-all ${updateReason === r.label ? `${r.bg} ${r.color} border-current ring-2 ring-offset-1` : 'bg-slate-50 hover:bg-slate-100'}`}><r.icon size={20}/>{r.label}</button>)}</div></div>
                {updateReason === 'אחר' && <input type="text" value={customUpdateReason || ''} onChange={(e) => setCustomUpdateReason(e.target.value)} placeholder="פרט סיבה..." className="w-full p-2 text-sm border rounded-lg" />}
-               <button onClick={addDailyUpdate} disabled={!updateStudentId} className={`w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 ${updateStudentId ? 'bg-indigo-600' : 'bg-slate-300'}`}><CheckCircle size={18}/> אשר היעדרות</button>
+               
+               <button onClick={addDailyUpdate} disabled={!updateStudentId || Object.keys(selectedAbsenceSlots).length === 0} className={`w-full py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 mt-4 transition-all ${updateStudentId && Object.keys(selectedAbsenceSlots).length > 0 ? 'bg-indigo-600 hover:bg-indigo-700 shadow-md' : 'bg-slate-300'}`}><CheckCircle size={20}/> שמור אישורים נבחרים</button>
             </div>
+
             <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col h-[500px]">
-               <h2 className="text-xl font-bold mb-4">רשימת אישורים ({formatHebrewDate(selectedDate)})</h2>
-               <div className="flex-1 overflow-y-auto space-y-2">
-                  {dailyUpdates.filter(u => u.date === selectedDate).map(u => { const st = students.find(s => s.id === u.studentId); return <div key={u.id} className="p-3 rounded-xl border bg-slate-50 flex justify-between items-center"><div><div className="font-bold">{st?.name}</div><div className="text-xs text-slate-500">{u.reason} • {u.subjectId === 'all' ? 'כל היום' : getSubjectName(u.subjectId)}</div></div><button onClick={() => removeUpdate(u.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-full"><Trash2 size={16}/></button></div> })}
-                  {!dailyUpdates.some(u => u.date === selectedDate) && <div className="text-center text-slate-400 mt-10">אין אישורים ליום זה</div>}
+               <div className="flex justify-between items-center mb-4">
+                 <h2 className="text-xl font-bold">אישורים קיימים במערכת</h2>
+                 <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="p-1 border rounded text-sm" />
+               </div>
+               <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                  {dailyUpdates.filter(u => u.date === selectedDate).map(u => { const st = students.find(s => s.id === u.studentId); return <div key={u.id} className="p-3 rounded-xl border bg-white shadow-sm flex justify-between items-center group hover:border-indigo-200"><div><div className="font-bold flex items-center gap-2">{st?.name} <span className="text-[10px] font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{getClassName(st?.classId)}</span></div><div className="text-xs text-slate-500 mt-1"><span className="font-bold text-indigo-600">{u.reason}</span> • {u.subjectId === 'all' ? 'יום שלם' : getSubjectName(u.subjectId)}</div></div><button onClick={() => removeUpdate(u.id)} className="text-slate-300 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors"><Trash2 size={18}/></button></div> })}
+                  {!dailyUpdates.some(u => u.date === selectedDate) && <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2"><CheckCircle size={32} className="opacity-20"/><div>אין אישורים ליום זה</div></div>}
                </div>
             </div>
           </div>
@@ -994,10 +986,60 @@ const App = () => {
                 <h2 className="text-lg font-bold flex items-center gap-2"><Lock size={20} className="text-indigo-600" />אבטחה</h2>
                 <div className="flex gap-4 items-center bg-slate-50 p-4 rounded-xl"><div className="flex-1"><label className="text-sm font-bold block mb-1">סיסמת מנהל</label><input type="text" value={globalSettings.adminPassword} onChange={(e) => { const v=e.target.value; setGlobalSettings(p=>({...p,adminPassword:v})); updateAdminPassword(v); }} className="w-full max-w-xs p-2 text-sm border rounded-lg outline-none font-mono tracking-widest bg-white"/></div></div>
              </div>
+
+             {/* מערכת שעות - חדש! */}
+             <div className="bg-white p-5 rounded-2xl border shadow-sm md:col-span-2">
+                <h2 className="text-lg font-bold flex items-center gap-2 mb-4"><Calendar size={20} className="text-indigo-600" />מערכת שעות לכיתה</h2>
+                <div className="mb-4">
+                   <label className="text-sm font-bold block mb-1">בחר כיתה לעריכת מערכת:</label>
+                   <select value={scheduleClassSelection} onChange={(e) => setScheduleClassSelection(e.target.value)} className="w-full max-w-xs p-2 border rounded-lg">
+                      <option value="">בחר...</option>
+                      {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                   </select>
+                </div>
+                
+                {scheduleClassSelection ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                     {DAYS_OF_WEEK.map((dayName, dayIndex) => {
+                       const daySchedules = schedules.filter(s => s.classId === scheduleClassSelection && s.dayOfWeek === dayIndex);
+                       return (
+                         <div key={dayIndex} className="border rounded-xl bg-slate-50 overflow-hidden flex flex-col">
+                            <div className="bg-slate-200 p-2 text-center font-bold text-sm border-b">{dayName}</div>
+                            <div className="p-2 flex-1 space-y-2 max-h-[300px] overflow-y-auto">
+                               {daySchedules.map(sched => (
+                                 <div key={sched.id} className="bg-white p-2 rounded border text-xs flex justify-between items-center shadow-sm">
+                                    <span className="truncate" title={getSubjectName(sched.subjectId)}>{getSubjectName(sched.subjectId)}</span>
+                                    <button onClick={() => removeScheduleItem(sched.id)} className="text-slate-400 hover:text-red-500"><Trash2 size={14}/></button>
+                                 </div>
+                               ))}
+                               {daySchedules.length === 0 && <div className="text-xs text-center text-slate-400 py-4">אין שיעורים</div>}
+                            </div>
+                            <div className="p-2 bg-white border-t mt-auto">
+                               <select 
+                                 className="w-full p-1 text-xs border rounded mb-1" 
+                                 onChange={(e) => {
+                                   if(e.target.value) {
+                                     addScheduleItem(scheduleClassSelection, dayIndex, e.target.value);
+                                     e.target.value = ""; // איפוס
+                                   }
+                                 }}
+                               >
+                                  <option value="">+ הוסף מקצוע</option>
+                                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                               </select>
+                            </div>
+                         </div>
+                       )
+                     })}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed">בחר כיתה כדי לראות ולערוך את מערכת השעות שלה.</div>
+                )}
+             </div>
              
              {/* Teachers & Assignments */}
              <div className="bg-white p-5 rounded-2xl border shadow-sm md:col-span-2">
-               <h2 className="text-lg font-bold flex items-center gap-2"><User size={20} className="text-indigo-600" />מורים ושיוכים</h2>
+               <h2 className="text-lg font-bold flex items-center gap-2"><User size={20} className="text-indigo-600" />מורים ושיוכים לדו"חות (שיוך מורה לדיווח כיתה)</h2>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2 p-3 bg-slate-50 rounded-xl">
                       <div className="text-sm font-bold">הוספת מורה</div>
