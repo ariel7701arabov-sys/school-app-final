@@ -120,7 +120,7 @@ const App = () => {
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [assignments, setAssignments] = useState([]); 
-  const [schedules, setSchedules] = useState([]); // חדש: מערכת שעות
+  const [schedules, setSchedules] = useState([]); 
   const [logs, setLogs] = useState([]);
   const [exams, setExams] = useState([]);
   const [grades, setGrades] = useState([]);
@@ -145,13 +145,13 @@ const App = () => {
   const [newExamDetails, setNewExamDetails] = useState(''); 
   const [newExamDate, setNewExamDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Admin Updates UI (אישורי היעדרות חדש - לוח שנה)
+  // Admin Updates UI
   const [updateStudentId, setUpdateStudentId] = useState('');
   const [updateReason, setUpdateReason] = useState('חולה');
   const [customUpdateReason, setCustomUpdateReason] = useState(''); 
   const [updateStudentSearch, setUpdateStudentSearch] = useState(''); 
   const [absenceWeekStart, setAbsenceWeekStart] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedAbsenceSlots, setSelectedAbsenceSlots] = useState({}); // { '2024-10-25': ['subId1', 'subId2'] או ['all'] }
+  const [selectedAbsenceSlots, setSelectedAbsenceSlots] = useState({});
 
   // Shabbat Approvals UI
   const [shabbatDate, setShabbatDate] = useState(new Date().toISOString().split('T')[0]);
@@ -192,7 +192,7 @@ const App = () => {
     { label: 'שמחה משפחתית', icon: PartyPopper, color: 'text-purple-600', bg: 'bg-purple-100' },
     { label: 'אחר', icon: HelpCircle, color: 'text-slate-600', bg: 'bg-slate-100' }
   ];
-  const DAYS_OF_WEEK = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי']; // 0-5 (ראשון-שישי)
+  const DAYS_OF_WEEK = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 
   // --- Firebase Init ---
   useEffect(() => {
@@ -247,7 +247,27 @@ const App = () => {
     return () => unsubs.forEach(fn => fn());
   }, [user, userRole, selectedDate, reportRange.start]);
 
-  useEffect(() => { if (subjects.length > 0 && !selectedSubject) setSelectedSubject(subjects[0].id); }, [subjects, selectedSubject]);
+  // --- תיקון תקיעות בבחירת מקצוע: איחוד הלוגיקה ל-useEffect יחיד ויעיל ---
+  const availableSubjects = useMemo(() => {
+    if (userRole === 'admin') return subjects;
+    if (userRole === 'teacher' && loggedInTeacherId) {
+      let relevantAssignments = assignments.filter(a => a.teacherId === loggedInTeacherId);
+      if (classFilter !== 'all') relevantAssignments = relevantAssignments.filter(a => a.classId === classFilter);
+      const subjectIds = [...new Set(relevantAssignments.map(a => a.subjectId))];
+      return subjects.filter(s => subjectIds.includes(s.id));
+    }
+    return [];
+  }, [subjects, userRole, loggedInTeacherId, assignments, classFilter]);
+
+  useEffect(() => {
+    if (availableSubjects.length > 0) {
+      if (!selectedSubject || !availableSubjects.find(s => s.id === selectedSubject)) {
+        setSelectedSubject(availableSubjects[0].id);
+      }
+    } else if (selectedSubject !== '') {
+      setSelectedSubject('');
+    }
+  }, [availableSubjects]); // תלוי אך ורק ב-availableSubjects כדי למנוע לולאות רינדור
 
   // --- Helpers ---
   const saveDoc = async (col, id, data) => { if (user) await setDoc(doc(db, `artifacts/${appId}/public/data`, col, id), data); };
@@ -301,34 +321,36 @@ const App = () => {
     return [];
   }, [classes, userRole, loggedInTeacherId, assignments]);
 
-  const availableSubjects = useMemo(() => {
-    if (userRole === 'admin') return subjects;
-    if (userRole === 'teacher' && loggedInTeacherId) {
-      let relevantAssignments = assignments.filter(a => a.teacherId === loggedInTeacherId);
-      if (classFilter !== 'all') relevantAssignments = relevantAssignments.filter(a => a.classId === classFilter);
-      const subjectIds = [...new Set(relevantAssignments.map(a => a.subjectId))];
-      return subjects.filter(s => subjectIds.includes(s.id));
-    }
-    return [];
-  }, [subjects, userRole, loggedInTeacherId, assignments, classFilter]);
-
-  useEffect(() => {
-    if (availableSubjects.length > 0 && !availableSubjects.find(s => s.id === selectedSubject)) {
-      setSelectedSubject(availableSubjects[0].id);
-    } else if (availableSubjects.length === 0) {
-      setSelectedSubject('');
-    }
-  }, [availableSubjects]);
-
   const filteredStudents = useMemo(() => {
     let relevantClasses = availableClasses;
     if (classFilter !== 'all') relevantClasses = classes.filter(c => c.id === classFilter);
-    const relevantClassIds = relevantClasses.map(c => c.id);
+    const relevantClassIds = new Set(relevantClasses.map(c => c.id));
     
     return students
-      .filter(s => relevantClassIds.includes(s.classId))
+      .filter(s => relevantClassIds.has(s.classId))
       .sort((a, b) => a.name.localeCompare(b.name, 'he')); 
   }, [students, availableClasses, classFilter]);
+
+  // --- אופטימיזציה לטעינה מהירה של נתוני נוכחות בממשק (מונע תקיעות בעת רינדור) ---
+  const todayLogsMap = useMemo(() => {
+    const map = new Map();
+    logs.filter(l => l.date === selectedDate && l.subjectId === selectedSubject).forEach(l => map.set(l.studentId, l));
+    return map;
+  }, [logs, selectedDate, selectedSubject]);
+
+  const todayUpdatesMap = useMemo(() => {
+    const map = new Map();
+    dailyUpdates.filter(u => u.date === selectedDate && (u.subjectId === 'all' || u.subjectId === selectedSubject)).forEach(u => map.set(u.studentId, u));
+    return map;
+  }, [dailyUpdates, selectedDate, selectedSubject]);
+
+  const currentExamGradesMap = useMemo(() => {
+    const map = new Map();
+    if (selectedExamId) {
+      grades.filter(g => g.examId === selectedExamId).forEach(g => map.set(g.studentId, g));
+    }
+    return map;
+  }, [grades, selectedExamId]);
 
   // --- Actions ---
   const addClass = () => { if(newClassName.trim()){ const id=crypto.randomUUID(); saveDoc('classes',id,{name:newClassName.trim()}); setNewClassName(''); } };
@@ -397,7 +419,6 @@ const App = () => {
     }
   };
 
-  // לוגיקה חדשה לשמירת אישורים לפי הלוח שנה
   const addDailyUpdate = async () => {
     if (updateStudentId && updateReason && Object.keys(selectedAbsenceSlots).length > 0) {
       const finalReason = updateReason === 'אחר' ? (customUpdateReason.trim() || 'אחר') : updateReason;
@@ -437,6 +458,26 @@ const App = () => {
   };
   const removeShabbatApproval = (id) => removeDoc('shabbat_approvals', id);
 
+  const addExam = () => { 
+    if (newExamTitle.trim() && selectedSubject) { 
+      const id = crypto.randomUUID(); 
+      saveDoc('exams', id, { 
+        title: newExamTitle.trim(), 
+        details: newExamDetails.trim(), 
+        subjectId: selectedSubject, 
+        date: newExamDate 
+      }); 
+      setNewExamTitle(''); 
+      setNewExamDetails('');
+    } 
+  };
+  const deleteExam = (id) => { removeDoc('exams', id); if(selectedExamId===id) setSelectedExamId(null); };
+  const updateGrade = (eid, sid, val) => { 
+    const id=`grade_${eid}_${sid}`; 
+    if(val==='') removeDoc('grades', id); 
+    else { const s=parseInt(val); if(s>=0&&s<=100) saveDoc('grades',id,{examId:eid,studentId:sid,score:s}); } 
+  };
+
   // --- Visual Calendar Logic for Approvals ---
   const toggleDayAbsence = (dateStr) => {
     setSelectedAbsenceSlots(prev => {
@@ -455,7 +496,6 @@ const App = () => {
         let current = prev[dateStr] || [];
         
         if (current.includes('all')) {
-            // אם היה "הכל" ולחצו על שיעור כדי לבטל, נהפוך את זה לרשימה של שאר השיעורים
             const dayOfWeek = new Date(dateStr).getDay();
             const subjectsThatDay = schedules.filter(s => s.classId === currentStudentClassId && s.dayOfWeek === dayOfWeek).map(s => s.subjectId);
             current = subjectsThatDay.filter(id => id !== subjectId);
@@ -482,24 +522,24 @@ const App = () => {
     });
   };
 
-  // --- Reports ---
+  // --- Reports (עברו אופטימיזציית Performance למניעת קריסות) ---
   const missingReports = useMemo(() => {
+    const logsByClassAndSubject = new Set();
+    logs.filter(l => l.date === selectedDate).forEach(l => {
+       const student = students.find(s => s.id === l.studentId);
+       if (student) logsByClassAndSubject.add(`${student.classId}_${l.subjectId}`);
+    });
+
+    const reportsSet = new Set(
+       dailyReports.filter(r => r.date === selectedDate).map(r => `${r.classId}_${r.subjectId}_${r.teacherId}`)
+    );
+
     return assignments.map(assign => {
-      const classStudentIds = students.filter(s => s.classId === assign.classId).map(s => s.id);
-      if (classStudentIds.length === 0) return null; 
+      const hasStudents = students.some(s => s.classId === assign.classId);
+      if (!hasStudents) return null; 
 
-      const hasLogs = logs.some(l => 
-        l.date === selectedDate && 
-        l.subjectId === assign.subjectId && 
-        classStudentIds.includes(l.studentId)
-      );
-
-      const hasConfirmation = dailyReports.some(r => 
-        r.date === selectedDate &&
-        r.classId === assign.classId &&
-        r.subjectId === assign.subjectId &&
-        r.teacherId === assign.teacherId
-      );
+      const hasLogs = logsByClassAndSubject.has(`${assign.classId}_${assign.subjectId}`);
+      const hasConfirmation = reportsSet.has(`${assign.classId}_${assign.subjectId}_${assign.teacherId}`);
 
       if (!hasLogs && !hasConfirmation) {
         return {
@@ -515,9 +555,13 @@ const App = () => {
     .sort((a, b) => a.className.localeCompare(b.className, 'he')); 
   }, [assignments, students, logs, selectedDate, dailyReports, teachers, classes, subjects]);
 
-
-  const getLog = (sid) => logs.find(l => l.date === selectedDate && l.subjectId === selectedSubject && l.studentId === sid);
-  const getDailyUpdate = (sid) => dailyUpdates.find(u => u.studentId === sid && u.date === selectedDate && (u.subjectId === 'all' || u.subjectId === selectedSubject));
+  const isCurrentViewReported = useMemo(() => {
+    if (classFilter === 'all' || !selectedSubject) return false;
+    const studentIds = new Set(filteredStudents.map(s=>s.id));
+    const hasLogs = logs.some(l => l.date === selectedDate && l.subjectId === selectedSubject && studentIds.has(l.studentId));
+    const hasReportDoc = dailyReports.some(r => r.date === selectedDate && r.classId === classFilter && r.subjectId === selectedSubject);
+    return hasLogs || hasReportDoc;
+  }, [logs, dailyReports, selectedDate, selectedSubject, classFilter, filteredStudents]);
   
   const dismissalReport = useMemo(() => {
     const activeLessonsSet = new Set();
@@ -537,29 +581,36 @@ const App = () => {
       }
     });
 
+    const subjectDurationMap = {};
+    subjects.forEach(s => subjectDurationMap[s.id] = s.duration || 45);
+
+    // חישוב מקדים של סך דקות לכל כיתה (מונע לולאה של מיליוני ריצות)
+    const classPotentialMinutes = {};
+    classes.forEach(c => {
+       let total = 0;
+       const start = new Date(reportRange.start);
+       const end = new Date(reportRange.end);
+       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+           const dStr = d.toISOString().split('T')[0];
+           subjects.forEach(sub => {
+              if (activeLessonsSet.has(`${c.id}_${dStr}_${sub.id}`)) {
+                total += (subjectDurationMap[sub.id] || 45);
+              }
+           });
+       }
+       classPotentialMinutes[c.id] = total;
+    });
+
     return students
       .filter(s => dismissalClassFilter === 'all' || s.classId === dismissalClassFilter)
       .map(student => {
         const sLogs = logs.filter(l => l.studentId === student.id && l.date >= reportRange.start && l.date <= reportRange.end);
         
-        // סינון הלוגים רק לאלו שאין להם אישור (או אישור כללי או אישור לאותו מקצוע)
         const validLogs = sLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId)));
         const penalty = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
         
         let mins = (13 * 60) + penalty;
-        let totalPotentialMinutes = 0;
-        
-        const start = new Date(reportRange.start);
-        const end = new Date(reportRange.end);
-        
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-           const dStr = d.toISOString().split('T')[0];
-           subjects.forEach(sub => {
-              if (activeLessonsSet.has(`${student.classId}_${dStr}_${sub.id}`)) {
-                totalPotentialMinutes += (sub.duration || 45);
-              }
-           });
-        }
+        let totalPotentialMinutes = classPotentialMinutes[student.classId] || 0;
         
         const presentMinutes = Math.max(0, totalPotentialMinutes - penalty);
         const percentage = totalPotentialMinutes > 0 ? Math.round((presentMinutes / totalPotentialMinutes) * 100) : 100;
@@ -589,15 +640,42 @@ const App = () => {
     }).sort((a, b) => b.total - a.total);
 
     const classStats = classes.map(cls => {
-      const sids = students.filter(s => s.classId === cls.id).map(s => s.id);
-      const cLogs = logs.filter(l => sids.includes(l.studentId) && l.date >= reportRange.start && l.date <= reportRange.end);
+      const sids = new Set(students.filter(s => s.classId === cls.id).map(s => s.id));
+      const cLogs = logs.filter(l => sids.has(l.studentId) && l.date >= reportRange.start && l.date <= reportRange.end);
       const validLogs = cLogs.filter(l => !dailyUpdates.some(u => u.studentId === l.studentId && u.date === l.date && (u.subjectId === 'all' || u.subjectId === l.subjectId)));
       const total = validLogs.reduce((acc, curr) => acc + (curr.minutes || 0), 0);
-      const avg = sids.length ? total / sids.length : 0;
-      return { id: cls.id, name: cls.name, total, avg, count: sids.length };
+      const avg = sids.size ? total / sids.size : 0;
+      return { id: cls.id, name: cls.name, total, avg, count: sids.size };
     }).sort((a, b) => b.avg - a.avg);
     return { subjectStats, classStats };
   }, [logs, subjects, classes, students, reportRange, dailyUpdates]);
+
+  const gradesStatsData = useMemo(() => {
+    const subjectStats = subjects.map(sub => {
+      const subExams = new Set(exams.filter(e => e.subjectId === sub.id).map(e => e.id));
+      const subGrades = grades.filter(g => subExams.has(g.examId));
+      const totalScore = subGrades.reduce((acc, curr) => acc + curr.score, 0);
+      const avg = subGrades.length > 0 ? (totalScore / subGrades.length) : 0;
+      return { id: sub.id, name: sub.name, avg, count: subGrades.length };
+    }).filter(s => s.count > 0).sort((a, b) => b.avg - a.avg);
+
+    const classStats = classes.map(cls => {
+      const sids = new Set(students.filter(s => s.classId === cls.id).map(s => s.id));
+      const cGrades = grades.filter(g => sids.has(g.studentId));
+      const totalScore = cGrades.reduce((acc, curr) => acc + curr.score, 0);
+      const avg = cGrades.length > 0 ? (totalScore / cGrades.length) : 0;
+      return { id: cls.id, name: cls.name, avg, count: cGrades.length };
+    }).filter(Boolean).filter(s => s.count > 0).sort((a, b) => b.avg - a.avg);
+    
+    const bestSubject = subjectStats.length ? subjectStats[0] : null;
+    const bestClass = classStats.length ? classStats[0] : null;
+
+    return { subjectStats, classStats, bestSubject, bestClass };
+  }, [exams, grades, subjects, classes, students]);
+
+  const filteredExams = useMemo(() => {
+    return exams.filter(e => e.subjectId === selectedSubject);
+  }, [exams, selectedSubject]);
 
   // --- Auth Handlers ---
   const handleAuth = () => {
@@ -651,7 +729,51 @@ const App = () => {
     <header className="mb-8 flex justify-between items-center"><div className="flex items-center gap-4"><button onClick={()=>setCurrentView('menu')} className="bg-white p-2 rounded-full shadow-sm"><ArrowLeft size={20}/></button><div><h1 className={`text-3xl font-bold flex items-center gap-2 ${color}`}><Icon className="opacity-80"/>{title}</h1><p className="text-slate-500 text-sm">{userRole==='admin'?'מנהל':getTeacherName(loggedInTeacherId)}</p></div></div></header>
   );
 
-  // --- Main App Returns ---
+  if (currentView === 'grades') return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no" style={{ backgroundImage: "url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
+      <div className="absolute inset-0 bg-slate-50/90 z-0"></div>
+      <div className="relative z-10 max-w-5xl mx-auto"><Header title="ציונים" icon={GraduationCap} color="text-emerald-700" />
+        <div className="mb-6 flex"><nav className="flex bg-white p-1 rounded-xl shadow-sm border overflow-x-auto"><button onClick={()=>setGradesActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${gradesActiveTab==='input'?'bg-emerald-600 text-white':'hover:bg-slate-100'}`}><ClipboardList size={18}/><span>הזנה</span></button>{userRole==='admin'&&<button onClick={()=>setGradesActiveTab('stats')} className={`flex items-center gap-2 px-4 py-2 rounded-lg ${gradesActiveTab==='stats'?'bg-emerald-600 text-white':'hover:bg-slate-100'}`}><BarChart3 size={18}/><span>סטטיסטיקה</span></button>}</nav></div>
+        {gradesActiveTab === 'input' ? (
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col md:flex-row gap-4 items-end">
+              {userRole==='admin' && <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">כיתה</label><select value={classFilter} onChange={(e)=>setClassFilter(e.target.value)} className="w-full p-2 border rounded-lg"><option value="all">הכל</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
+              <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">מקצוע</label><select value={selectedSubject} onChange={(e)=>{setSelectedSubject(e.target.value);setSelectedExamId(null);}} className="w-full p-2 border rounded-lg">{availableSubjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+              {userRole==='teacher' && <div className="flex-1 w-full"><label className="text-sm font-bold block mb-1">כיתה</label><select value={classFilter} onChange={(e)=>setClassFilter(e.target.value)} className="w-full p-2 border rounded-lg"><option value="all">בחר...</option>{availableClasses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="space-y-4">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border">
+                   <h3 className="font-bold text-lg mb-4">מבחנים</h3>
+                   <div className="space-y-2 mb-4 bg-slate-50 p-3 rounded-xl border"><input type="text" value={newExamTitle} onChange={(e)=>setNewExamTitle(e.target.value)} placeholder="שם..." className="w-full p-2 text-sm border rounded-lg mb-2"/>
+                   <textarea value={newExamDetails} onChange={(e)=>setNewExamDetails(e.target.value)} placeholder="נושא/חומר למבחן..." className="w-full p-2 text-sm border rounded-lg mb-2 h-20 resize-none"></textarea>
+                   <div className="flex gap-2"><input type="date" value={newExamDate} onChange={(e)=>setNewExamDate(e.target.value)} className="w-full p-2 text-sm border rounded-lg"/><button onClick={addExam} className="p-2 bg-emerald-600 text-white rounded-lg"><Plus size={18}/></button></div><div className="text-xs text-center text-slate-500 font-bold">{formatHebrewDate(newExamDate)}</div></div>
+                   <div className="space-y-2 max-h-[400px] overflow-y-auto">{filteredExams.map(e=><div key={e.id} onClick={()=>setSelectedExamId(e.id)} className={`p-3 rounded-xl border cursor-pointer ${selectedExamId===e.id?'bg-emerald-50 border-emerald-500':'bg-slate-50'}`}><div className="flex justify-between"><div><div className="font-bold">{e.title}</div><div className="text-xs text-slate-500 mb-1">{formatDualDate(e.date)}</div><div className="text-xs text-slate-400 italic flex items-center gap-1"><FileText size={10}/> {e.details || 'אין פירוט'}</div></div><button onClick={(ev)=>{ev.stopPropagation();deleteExam(e.id)}} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div></div>)}</div>
+                </div>
+              </div>
+              <div className="lg:col-span-2">
+                {selectedExamId ? <div className="bg-white rounded-2xl shadow-sm border overflow-hidden"><div className="bg-slate-50 p-4 border-b flex justify-between"><div><h3 className="font-bold text-lg">{exams.find(e=>e.id===selectedExamId)?.title}</h3><div className="text-xs text-slate-500 mt-1">{exams.find(e=>e.id===selectedExamId)?.details}</div></div><div className="text-sm bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full font-bold h-fit">ממוצע: {getExamAverage(selectedExamId)}</div></div><table className="w-full"><thead className="bg-slate-50 border-b text-sm"><tr><th className="px-6 py-3 text-right">תלמיד</th><th className="px-6 py-3 text-center w-32">ציון</th></tr></thead><tbody className="divide-y">{filteredStudents.map(s=>{ const grade = currentExamGradesMap.get(s.id)?.score ?? ''; return <tr key={s.id}><td className="px-6 py-3"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{getClassName(s.classId)}</div></td><td className="px-6 py-3 text-center"><input type="number" value={grade} onChange={(e)=>updateGrade(selectedExamId,s.id,e.target.value)} className="w-20 text-center p-2 border rounded-lg font-bold bg-slate-50" /></td></tr>})}</tbody></table></div> : <div className="bg-white p-12 rounded-2xl border border-dashed text-center text-slate-400">בחר מבחן</div>}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100 relative overflow-hidden"><div className="relative z-10"><div className="text-emerald-800 font-bold mb-1 flex items-center gap-2"><Star size={18}/> מקצוע מצטיין</div><div className="text-2xl font-black text-emerald-600 truncate">{gradesStatsData.bestSubject ? gradesStatsData.bestSubject.name : '---'}</div><div className="text-xs text-emerald-500 mt-2">{gradesStatsData.bestSubject ? `ממוצע: ${gradesStatsData.bestSubject.avg.toFixed(1)}` : 'אין נתונים'}</div></div><Trophy className="absolute -bottom-4 -left-4 text-emerald-100 w-24 h-24" /></div>
+                <div className="bg-rose-50 p-6 rounded-2xl border border-rose-100 relative overflow-hidden"><div className="relative z-10"><div className="text-rose-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> מקצוע חלש</div><div className="text-2xl font-black text-rose-600 truncate">{gradesStatsData.subjectStats.length > 0 ? gradesStatsData.subjectStats[gradesStatsData.subjectStats.length - 1].name : '---'}</div><div className="text-xs text-rose-500 mt-2">{gradesStatsData.subjectStats.length > 0 ? `ממוצע: ${gradesStatsData.subjectStats[gradesStatsData.subjectStats.length - 1].avg.toFixed(1)}` : 'אין נתונים'}</div></div><BookOpen className="absolute -bottom-4 -left-4 text-rose-100 w-24 h-24" /></div>
+                <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 relative overflow-hidden"><div className="relative z-10"><div className="text-blue-800 font-bold mb-1 flex items-center gap-2"><School size={18}/> כיתה מצטיינת</div><div className="text-2xl font-black text-blue-600 truncate">{gradesStatsData.bestClass ? gradesStatsData.bestClass.name : '---'}</div><div className="text-xs text-blue-500 mt-2">{gradesStatsData.bestClass ? `ממוצע: ${gradesStatsData.bestClass.avg.toFixed(1)}` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-blue-100 w-24 h-24" /></div>
+                <div className="bg-orange-50 p-6 rounded-2xl border border-orange-100 relative overflow-hidden"><div className="relative z-10"><div className="text-orange-800 font-bold mb-1 flex items-center gap-2"><AlertTriangle size={18}/> כיתה לשיפור</div><div className="text-2xl font-black text-orange-600 truncate">{gradesStatsData.classStats.length > 0 ? gradesStatsData.classStats[gradesStatsData.classStats.length - 1].name : '---'}</div><div className="text-xs text-orange-500 mt-2">{gradesStatsData.classStats.length > 0 ? `ממוצע: ${gradesStatsData.classStats[gradesStatsData.classStats.length - 1].avg.toFixed(1)}` : 'אין נתונים'}</div></div><Users className="absolute -bottom-4 -left-4 text-orange-100 w-24 h-24" /></div>
+             </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div className="p-4 border-b border-slate-100 font-bold text-slate-700">דירוג מקצועות</div><table className="w-full text-sm overflow-x-auto"><thead className="bg-slate-50"><tr><th className="p-3 text-right">מקצוע</th><th className="p-3 text-center">ממוצע</th><th className="p-3 text-center">ציונים</th></tr></thead><tbody className="divide-y divide-slate-100">{gradesStatsData.subjectStats.map((sub, idx) => (<tr key={sub.id}><td className="p-3 font-medium">{sub.name}</td><td className="p-3 text-center font-bold">{sub.avg.toFixed(1)}</td><td className="p-3 text-center">{sub.count}</td></tr>))}</tbody></table></div>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div className="p-4 border-b border-slate-100 font-bold text-slate-700">דירוג כיתות</div><table className="w-full text-sm overflow-x-auto"><thead className="bg-slate-50"><tr><th className="p-3 text-right">כיתה</th><th className="p-3 text-center">ממוצע</th><th className="p-3 text-center">ציונים</th></tr></thead><tbody className="divide-y divide-slate-100">{gradesStatsData.classStats.map((cls, idx) => (<tr key={cls.id}><td className="p-3 font-medium">{cls.name}</td><td className="p-3 text-center font-bold">{cls.avg.toFixed(1)}</td><td className="p-3 text-center">{cls.count}</td></tr>))}</tbody></table></div>
+             </div>
+          </div>
+        )}
+      </div></div>
+  );
+
+  // --- Main Render ---
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 font-sans notranslate" dir="rtl" translate="no" style={{ backgroundImage: "url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
       <div className="absolute inset-0 bg-slate-50/90 z-0"></div>
@@ -670,7 +792,6 @@ const App = () => {
               <div className="space-y-2"><label className="text-sm font-bold block">מקצוע</label><select value={selectedSubject} onChange={(e)=>setSelectedSubject(e.target.value)} className="w-full p-2 border rounded-lg">{availableSubjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             </div>
             
-            {/* Mark All Present Button - Visible to Teacher AND Admin */}
             {( (userRole === 'teacher' && selectedSubject && classFilter !== 'all') || 
                (userRole === 'admin' && selectedSubject && classFilter !== 'all') ) && (
               <div className="flex justify-end">
@@ -684,7 +805,7 @@ const App = () => {
               </div>
             )}
 
-            <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto"><table className="w-full text-sm md:text-base"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">סטטוס</th></tr></thead><tbody className="divide-y">{filteredStudents.length>0 ? filteredStudents.map(s=>{ const l=getLog(s.id); const u=getDailyUpdate(s.id); return <tr key={s.id} className="hover:bg-slate-50"><td className="px-6 py-4"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{getClassName(s.classId)}</div></td><td className="px-6 py-4"><div className="flex justify-center gap-2">{u?<div className={`px-4 py-2 rounded-xl border flex items-center gap-2 font-bold w-full justify-center ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.bg} ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.color}`}><CheckCircle size={16}/>{u.reason} (מאושר)</div>:<><div className={`flex items-center gap-1 p-1 rounded-xl border ${l?.status==='late'?'bg-amber-100 border-amber-500 text-amber-800':'bg-white border-slate-200'}`}><button onClick={()=>updateAttendance(s.id,'late',l?.status==='late'?l.minutes:5)} className="p-1"><Clock size={18}/></button><input type="number" placeholder="דק'" value={l?.status==='late'?l.minutes:''} onChange={(e)=>updateAttendance(s.id,'late',parseInt(e.target.value)||0)} className="w-10 bg-transparent text-center font-bold"/></div><button onClick={()=>updateAttendance(s.id,'absent')} className={`p-2 rounded-xl border ${l?.status==='absent'?'bg-red-100 border-red-500':'bg-white'}`}><XCircle size={18}/></button>{l && <button onClick={()=>updateAttendance(s.id,null)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"><RotateCcw size={18}/></button>}</>}</div></td></tr> }) : <tr><td colSpan="2" className="p-8 text-center text-slate-400">אין תלמידים / בחר כיתה ומקצוע</td></tr>}</tbody></table></div>
+            <div className="bg-white rounded-2xl shadow-sm border overflow-x-auto"><table className="w-full text-sm md:text-base"><thead className="bg-slate-50 border-b"><tr><th className="px-6 py-4 text-right">תלמיד</th><th className="px-6 py-4 text-center">סטטוס</th></tr></thead><tbody className="divide-y">{filteredStudents.length>0 ? filteredStudents.map(s=>{ const l=todayLogsMap.get(s.id); const u=todayUpdatesMap.get(s.id); return <tr key={s.id} className="hover:bg-slate-50"><td className="px-6 py-4"><div className="font-bold">{s.name}</div><div className="text-xs text-slate-400">{getClassName(s.classId)}</div></td><td className="px-6 py-4"><div className="flex justify-center gap-2">{u?<div className={`px-4 py-2 rounded-xl border flex items-center gap-2 font-bold w-full justify-center ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.bg} ${ABSENCE_REASONS.find(r=>r.label===u.reason)?.color}`}><CheckCircle size={16}/>{u.reason} (מאושר)</div>:<><div className={`flex items-center gap-1 p-1 rounded-xl border ${l?.status==='late'?'bg-amber-100 border-amber-500 text-amber-800':'bg-white border-slate-200'}`}><button onClick={()=>updateAttendance(s.id,'late',l?.status==='late'?l.minutes:5)} className="p-1"><Clock size={18}/></button><input type="number" placeholder="דק'" value={l?.status==='late'?l.minutes:''} onChange={(e)=>updateAttendance(s.id,'late',parseInt(e.target.value)||0)} className="w-10 bg-transparent text-center font-bold"/></div><button onClick={()=>updateAttendance(s.id,'absent')} className={`p-2 rounded-xl border ${l?.status==='absent'?'bg-red-100 border-red-500':'bg-white'}`}><XCircle size={18}/></button>{l && <button onClick={()=>updateAttendance(s.id,null)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"><RotateCcw size={18}/></button>}</>}</div></td></tr> }) : <tr><td colSpan="2" className="p-8 text-center text-slate-400">אין תלמידים / בחר כיתה ומקצוע</td></tr>}</tbody></table></div>
           </div>
         )}
 
@@ -987,7 +1108,7 @@ const App = () => {
                 <div className="flex gap-4 items-center bg-slate-50 p-4 rounded-xl"><div className="flex-1"><label className="text-sm font-bold block mb-1">סיסמת מנהל</label><input type="text" value={globalSettings.adminPassword} onChange={(e) => { const v=e.target.value; setGlobalSettings(p=>({...p,adminPassword:v})); updateAdminPassword(v); }} className="w-full max-w-xs p-2 text-sm border rounded-lg outline-none font-mono tracking-widest bg-white"/></div></div>
              </div>
 
-             {/* מערכת שעות - חדש! */}
+             {/* מערכת שעות */}
              <div className="bg-white p-5 rounded-2xl border shadow-sm md:col-span-2">
                 <h2 className="text-lg font-bold flex items-center gap-2 mb-4"><Calendar size={20} className="text-indigo-600" />מערכת שעות לכיתה</h2>
                 <div className="mb-4">
